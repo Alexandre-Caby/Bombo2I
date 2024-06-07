@@ -7,9 +7,18 @@
  * @return int
  */
 int main() {
+    // Initialize the random number generator
     srand(time(NULL));
+    // Create a new map
     Map *map = map_new(MAX_MAP_WIDTH, MAX_MAP_HEIGHT);
     generateMap(map);
+
+    // Create a player
+    Player player;
+    initPlayer(&player, map);
+
+    // Initialize GPIO pins
+    gpioInitialise();
 
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -48,25 +57,44 @@ int main() {
         return 1;
     }
 
+    Uint32 time = 0;
+    Uint32 bombPlacementTime = 5000;
     int running = 1;
     SDL_Event event;
     while (running) {
         while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_QUIT) {
+            if (event.type == SDL_QUIT || event.key.keysym.sym == SDLK_ESCAPE) {
                 running = 0;
-            } else if (event.type == SDL_MOUSEBUTTONDOWN) {
-                int x = event.button.x / CELL_SIZE;
-                int y = event.button.y / CELL_SIZE;
-                if (x > 0 && y > 0 && x < map->width && y < map->height) {
-                    // Toggle between START and END points for simplicity
-                    if (map->cells[y * map->width + x] == PATH) {
-                        placePoint(map, x, y, START);
-                    } else if (map->cells[y * map->width + x] == START) {
-                        placePoint(map, x, y, END);
-                    } else if (map->cells[y * map->width + x] == END) {
-                        placePoint(map, x, y, PATH);
+            // } else if (event.type == SDL_MOUSEBUTTONDOWN) {
+            //     int x = event.button.x / CELL_SIZE;
+            //     int y = event.button.y / CELL_SIZE;
+            //     if (x > 0 && y > 0 && x < map->width && y < map->height) {
+            //         if (map->cells[y * map->width + x] == PATH) {
+            //             placePoint(map, renderer, font, x, y, BOMB);
+            //         } else if (map->cells[y * map->width + x] == BOMB) {
+            //             placePoint(map, renderer, font, x, y, DEACTIVATED_BOMB);
+            //         } else if (map->cells[y * map->width + x] == DEACTIVATED_BOMB) {
+            //             placePoint(map, renderer, font, x, y, PATH);
+            //         }
+            //     }
+            } else if (event.type == SDL_KEYDOWN) {
+                handleInput(&player, map, event);
+                if (event.key.keysym.sym == SDLK_SPACE) {
+                    if (map->cells[player.y * map->width + player.x] == PATH) {
+                        if (player.role == BOMBER) {
+                            if(SDL_GetTicks() - time > bombPlacementTime) {
+                                time = SDL_GetTicks();
+                                placePoint(map, renderer, font, player.x, player.y, BOMB);
+                            } else {
+                                showMessage(renderer, font, "Cannot place point: You must wait 5 seconds between each bombing.");
+                            }
+                        } else {
+                            placePoint(map, renderer, font, player.x, player.y, DEACTIVATED_BOMB);
+                        }
                     }
                 }
+            } else if (event.type == SDL_USEREVENT+1){
+                handleInput(&player, map, event);
             }
         }
 
@@ -74,6 +102,8 @@ int main() {
         SDL_RenderClear(renderer);
 
         drawMap(renderer, map, font);
+
+        renderPlayer(renderer, &player);
 
         SDL_RenderPresent(renderer);
     }
@@ -132,11 +162,11 @@ void drawMap(SDL_Renderer *renderer, Map *map, TTF_Font *font) {
                 case PATH:
                     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
                     break;
-                case START:
-                    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // Red for the starting point
+                case BOMB:
+                    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // Red for the bomb
                     break;
-                case END:
-                    SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255); // Blue for the ending point
+                case DEACTIVATED_BOMB:
+                    SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255); // Green for the deactivated bomb
                     break;
             }
             SDL_RenderFillRect(renderer, &rect);
@@ -179,7 +209,7 @@ void drawMap(SDL_Renderer *renderer, Map *map, TTF_Font *font) {
  */
 void carvePathFrom(int x, int y, Map *map) {
     int directions[] = { 0, 1, 2, 3 };
-    // Mélange des directions
+    // Shuffle the directions array
     for (int i = 0; i < 4; i++) {
         int r = rand() % 4;
         int temp = directions[i];
@@ -253,11 +283,20 @@ void generateMap(Map *map) {
             }
         }
     }
+
+    // Add some random obstacles 
+    for (int y = 1; y < map->height; y++) {
+        for (int x = 1; x < map->width; x++) {
+            if (map->cells[y * map->width + x] == PATH && rand() % 100 < 4) {
+                map->cells[y * map->width + x] = WALL;
+            }
+        }
+    }
 }
 
 /**
  * function setSpecialPoint
- * @brief Set the Special Point object
+ * @brief Set a special point on the map
  * 
  * @param map 
  * @param x 
@@ -272,19 +311,58 @@ void setSpecialPoint(Map *map, int x, int y, int state) {
 }
 
 /**
- * function isPath
- * @brief Check if a cell is a path
+ * function isAccessible
+ * @brief Check if a cell is accessible from a path, i.e. not surrounded by walls
  * 
  * @param map 
  * @param x 
  * @param y 
  * @return int
  */
-int isPath(Map *map, int x, int y) {
-    if (x >= 0 && x < map->width && y >= 0 && y < map->height) {
-        return map->cells[y * map->width + x] == PATH;
+int isAccessible(Map *map, int x, int y) {
+    // Check if the coordinates are within the map boundaries
+    if (x < 0 || x >= map->width || y < 0 || y >= map->height) {
+        return 0;
     }
-    return 0;
+
+    // Check if the cell itself is a path
+    if (map->cells[y * map->width + x] != PATH) {
+        return 0;
+    }
+
+    // Check adjacent cells
+    int numWalls = 0;
+    if (x > 0 && map->cells[y * map->width + (x - 1)] == WALL) {
+        numWalls++; // Left cell
+    }
+    if (x < map->width - 1 && map->cells[y * map->width + (x + 1)] == WALL) {
+        numWalls++; // Right cell
+    }
+    if (y > 0 && map->cells[(y - 1) * map->width + x] == WALL) {
+        numWalls++; // Upper cell
+    }
+    if (y < map->height - 1 && map->cells[(y + 1) * map->width + x] == WALL) {
+        numWalls++; // Lower cell
+    }
+
+    // If there are 4 walls around the cell, it's not accessible
+    if (numWalls == 4) {
+        return 0;
+    }
+
+    // Check if the cell is connected to a path
+    if (numWalls == 3) {
+        // Check diagonally adjacent cells
+        if ((x > 0 && y > 0 && map->cells[(y - 1) * map->width + (x - 1)] != WALL) ||
+            (x < map->width - 1 && y > 0 && map->cells[(y - 1) * map->width + (x + 1)] != WALL) ||
+            (x > 0 && y < map->height - 1 && map->cells[(y + 1) * map->width + (x - 1)] != WALL) ||
+            (x < map->width - 1 && y < map->height - 1 && map->cells[(y + 1) * map->width + (x + 1)] != WALL)) {
+            return 1;
+        }
+        return 0;
+    }
+
+    return 1;
 }
 
 /**
@@ -297,15 +375,190 @@ int isPath(Map *map, int x, int y) {
  * @param state 
  * @return void
  */
-void placePoint(Map *map, int x, int y, int state) {
+void placePoint(Map *map, SDL_Renderer *renderer, TTF_Font *font, int x, int y, int state) {
     int count = 0;
-    if (count == 5) {
-        printf("Cannot place point at (%d, %d): Too many points\n", x, y);
+    for (int i = 0; i < map->width * map->height; ++i) {
+        if (map->cells[i] == BOMB || map->cells[i] == DEACTIVATED_BOMB) {
+            ++count;
+        }
+    }
+    
+    if (count >= 5) {
+        showMessage(renderer, font, "Cannot place point: Too many points ! The maximum allowed is 5.");
         return;
     }
-    if (isPath(map, x, y)) {
-        setSpecialPoint(map, x, y, state);
-    } else {
-        printf("Cannot place point at (%d, %d): Not a path\n", x, y);
+    
+    if (!isAccessible(map, x, y)) {
+        showMessage(renderer, font, "Cannot place point: The cell is not accessible.");
+        return;
     }
+
+    // if it's a wall, we can't place a point
+    if (map->cells[y * map->width + x] == WALL) {
+        showMessage(renderer, font, "Cannot place point: The cell is a wall.");
+        return;
+    }
+    
+    setSpecialPoint(map, x, y, state);
+}
+
+/**
+ * function renderText
+ * @brief Render text on the screen
+ * 
+ * @param renderer 
+ * @param font 
+ * @param text 
+ * @param x 
+ * @param y 
+ * @param color 
+ * @return void
+ */
+void renderText(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y, SDL_Color color, SDL_Color bgColor) {
+    TTF_SetFontSize(font, 26);
+    SDL_Surface *textSurface = TTF_RenderText_Solid(font, text, color);
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, textSurface);
+    int text_width = textSurface->w;
+    int text_height = textSurface->h;
+    SDL_FreeSurface(textSurface);
+
+    SDL_Rect textRect = { x, y, text_width, text_height };
+    SDL_SetRenderDrawColor(renderer, bgColor.r, bgColor.g, bgColor.b, bgColor.a);
+    SDL_RenderFillRect(renderer, &textRect);
+    SDL_RenderCopy(renderer, texture, NULL, &textRect);
+    SDL_DestroyTexture(texture);
+    TTF_SetFontSize(font, 12);
+}
+
+/**
+ * function showMessage
+ * @brief Display a message on the screen
+ * 
+ * @param renderer 
+ * @param font 
+ * @param message 
+ * @return void
+ */
+void showMessage(SDL_Renderer *renderer, TTF_Font *font, const char *message) {
+    SDL_Color color = { 255, 0, 0, 255 }; // Red color
+    // a backgournd with less opacity
+    SDL_Color bgColor = { 0, 0, 0, 150 }; // Black color
+    // Center the message on the screen dynamically based on the message length 
+    int x = MAX_MAP_WIDTH * CELL_SIZE / 2 + 100 - strlen(message) * 5;
+    int y = MAX_MAP_HEIGHT * CELL_SIZE / 4;
+    renderText(renderer, font, message, x, y, color, bgColor);
+    SDL_RenderPresent(renderer);
+    SDL_Delay(2000); // Display message for 2 seconds
+    SDL_RenderClear(renderer); // Clear the message after 2 seconds
+}
+
+/**
+ * function initPlayer
+ * @brief Initialize the player position
+ * 
+ * @param player 
+ * @param map 
+ * @return void
+ */
+void initPlayer(Player *player, Map *map) {
+    // Definethe player's role and BOMBing position
+    player->role = random() % 2 == 0 ? BOMBER : MINE_CLEARER;
+    player->x = 1;
+    player->y = 1;
+    while (map->cells[player->y * map->width + player->x] == WALL) {
+        player->x++;
+    }
+}
+
+/**
+ * function movePlayer
+ * @brief Move the player on the map with the arrow keys or gpio buttons
+ * 
+ * @param map
+ * @param player
+ * @param dx
+ * @param dy
+ * @return void
+ */
+void movePlayer(Player *player, Map *map, int dx, int dy) {
+    int newX = player->x + dx;
+    int newY = player->y + dy;
+
+    // Check if the new position is within the map boundaries and is not a wall
+    if (newX >= 0 && newX < map->width && newY >= 0 && newY < map->height && map->cells[newY * map->width + newX] != WALL) {
+        player->x = newX;
+        player->y = newY;
+    }
+}
+
+/**
+ * function handleInput
+ * @brief Handle the input from the user
+ * 
+ * @param player 
+ * @param map 
+ * @param event 
+ * @return void
+ */
+void handleInput(Player *player, Map *map, SDL_Event event) {
+    if (event.type == SDL_KEYDOWN) {
+        switch (event.key.keysym.sym) {
+            case SDLK_UP:
+                movePlayer(player, map, 0, -1);
+                break;
+            case SDLK_DOWN:
+                movePlayer(player, map, 0, 1);
+                break;
+            case SDLK_LEFT:
+                movePlayer(player, map, -1, 0);
+                break;
+            case SDLK_RIGHT:
+                movePlayer(player, map, 1, 0);
+                break;
+        }
+    }
+
+    if (event.type == SDL_USEREVENT+1) {
+        if (event.user.code == GPIO_PIN_UP) {
+            movePlayer(player, map, 0, -1);
+        } else if (event.user.code == GPIO_PIN_DOWN) {
+            movePlayer(player, map, 0, 1);
+        } else if (event.user.code == GPIO_PIN_LEFT) {
+            movePlayer(player, map, -1, 0);
+        } else if (event.user.code == GPIO_PIN_RIGHT) {
+            movePlayer(player, map, 1, 0);
+        }
+    }
+}
+
+/**
+ * function renderPlayer
+ * @brief Render the player on the map
+ * 
+ * @param renderer 
+ * @param player 
+ * @return void
+ */
+void renderPlayer(SDL_Renderer *renderer, Player *player) {
+    if (player->role == BOMBER) {
+        SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255); // Blue color for the player BOMBER
+    } else {
+        SDL_SetRenderDrawColor(renderer, 255, 0, 255, 255); // Purple color for the player MINE_CLEARER
+    }
+    SDL_Rect playerRect = { player->x * CELL_SIZE, player->y * CELL_SIZE, CELL_SIZE, CELL_SIZE };
+    SDL_RenderFillRect(renderer, &playerRect);
+}
+
+/**
+ * function gpioInitialise
+ * @brief Initialize the GPIO pins
+ * 
+ * @return void
+ */
+void gpioInitialise() {
+    // wiringPiSetup();
+    // pinMode(GPIO_PIN_UP, INPUT);
+    // pinMode(GPIO_PIN_DOWN, INPUT);
+    // pinMode(GPIO_PIN_LEFT, INPUT);
+    // pinMode(GPIO_PIN_RIGHT, INPUT);
 }
