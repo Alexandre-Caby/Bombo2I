@@ -1,19 +1,19 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <SDL2/SDL.h>   
+#include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <time.h>
-// #include <wiringPi.h>
+#include <wiringPi.h>
 
 // --- Constants ---
-#define MAX_MAP_WIDTH 40
-#define MAX_MAP_HEIGHT 40
+#define MAX_MAP_WIDTH 45
+#define MAX_MAP_HEIGHT 20
 #define MAX_MAP_SIZE MAX_MAP_WIDTH * MAX_MAP_HEIGHT
 #define CELL_SIZE 24
-#define GPIO_PIN_UP 37
-#define GPIO_PIN_DOWN 33
-#define GPIO_PIN_LEFT 22
-#define GPIO_PIN_RIGHT 35
+#define GPIO_PIN_UP 37 // GPIO pin for the up button
+#define GPIO_PIN_DOWN 33 // GPIO pin for the down button
+#define GPIO_PIN_LEFT 22 // GPIO pin for the left button
+#define GPIO_PIN_RIGHT 35 // GPIO pin for the right button
 
 // --- Structures ---
 typedef struct {

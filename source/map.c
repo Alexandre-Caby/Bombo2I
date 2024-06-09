@@ -41,7 +41,7 @@ int main() {
         return 1;
     }
 
-    TTF_Font *font = TTF_OpenFont("/home/alexandre/Bureau/IG2I/La1/Objet connecté/source/Bombo2I/ressources/Minecraft.ttf", 12);
+    TTF_Font *font = TTF_OpenFont("../ressources/Minecraft.ttf", 12);
     if (!font) {
         fprintf(stderr, "Could not load font: %s\n", TTF_GetError());
         TTF_Quit();
@@ -65,18 +65,6 @@ int main() {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT || event.key.keysym.sym == SDLK_ESCAPE) {
                 running = 0;
-            // } else if (event.type == SDL_MOUSEBUTTONDOWN) {
-            //     int x = event.button.x / CELL_SIZE;
-            //     int y = event.button.y / CELL_SIZE;
-            //     if (x > 0 && y > 0 && x < map->width && y < map->height) {
-            //         if (map->cells[y * map->width + x] == PATH) {
-            //             placePoint(map, renderer, font, x, y, BOMB);
-            //         } else if (map->cells[y * map->width + x] == BOMB) {
-            //             placePoint(map, renderer, font, x, y, DEACTIVATED_BOMB);
-            //         } else if (map->cells[y * map->width + x] == DEACTIVATED_BOMB) {
-            //             placePoint(map, renderer, font, x, y, PATH);
-            //         }
-            //     }
             } else if (event.type == SDL_KEYDOWN) {
                 handleInput(&player, map, event);
                 if (event.key.keysym.sym == SDLK_SPACE) {
@@ -93,10 +81,36 @@ int main() {
                         }
                     }
                 }
-            } else if (event.type == SDL_USEREVENT+1){
-                handleInput(&player, map, event);
+            } else if (event.type == SDL_USEREVENT+1) {
+                if(event.user.code == GPIO_PIN_UP || event.user.code == GPIO_PIN_DOWN || event.user.code == GPIO_PIN_LEFT || event.user.code == GPIO_PIN_RIGHT) {
+                    handleInput(&player, map, event);
+                }
             }
         }
+
+        if(digitalRead(GPIO_PIN_UP) == HIGH) {
+            event.type = SDL_USEREVENT+1;
+            event.user.code = GPIO_PIN_UP;
+            SDL_PushEvent(&event);
+            printf("up\n");
+        } else if(digitalRead(GPIO_PIN_DOWN) == HIGH) {
+            event.type = SDL_USEREVENT+1;
+            event.user.code = GPIO_PIN_DOWN;
+            SDL_PushEvent(&event);
+            printf("down\n");
+        } else if(digitalRead(GPIO_PIN_LEFT) == HIGH) {
+            event.type = SDL_USEREVENT+1;
+            event.user.code = GPIO_PIN_LEFT;
+            SDL_PushEvent(&event);
+            printf("left\n");
+        } else if(digitalRead(GPIO_PIN_RIGHT) == HIGH) {
+            event.type = SDL_USEREVENT+1;
+            event.user.code = GPIO_PIN_RIGHT;
+            SDL_PushEvent(&event);
+            printf("right\n");
+        }
+
+        handleInput(&player, map, event);
 
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         SDL_RenderClear(renderer);
@@ -462,7 +476,7 @@ void showMessage(SDL_Renderer *renderer, TTF_Font *font, const char *message) {
  */
 void initPlayer(Player *player, Map *map) {
     // Definethe player's role and BOMBing position
-    player->role = random() % 2 == 0 ? BOMBER : MINE_CLEARER;
+    player->role = rand() % 2 == 0 ? BOMBER : MINE_CLEARER;
     player->x = 1;
     player->y = 1;
     while (map->cells[player->y * map->width + player->x] == WALL) {
@@ -520,12 +534,16 @@ void handleInput(Player *player, Map *map, SDL_Event event) {
 
     if (event.type == SDL_USEREVENT+1) {
         if (event.user.code == GPIO_PIN_UP) {
+            printf("Pressed up\n");
             movePlayer(player, map, 0, -1);
         } else if (event.user.code == GPIO_PIN_DOWN) {
+            printf("Pressed down\n");
             movePlayer(player, map, 0, 1);
         } else if (event.user.code == GPIO_PIN_LEFT) {
+            printf("Pressed left\n");
             movePlayer(player, map, -1, 0);
         } else if (event.user.code == GPIO_PIN_RIGHT) {
+            printf("Pressed right\n");
             movePlayer(player, map, 1, 0);
         }
     }
@@ -556,9 +574,12 @@ void renderPlayer(SDL_Renderer *renderer, Player *player) {
  * @return void
  */
 void gpioInitialise() {
-    // wiringPiSetup();
-    // pinMode(GPIO_PIN_UP, INPUT);
-    // pinMode(GPIO_PIN_DOWN, INPUT);
-    // pinMode(GPIO_PIN_LEFT, INPUT);
-    // pinMode(GPIO_PIN_RIGHT, INPUT);
+    wiringPiSetupGpio();
+    pinMode(GPIO_PIN_UP, INPUT);
+    pinMode(GPIO_PIN_DOWN, INPUT);
+    pinMode(GPIO_PIN_LEFT, INPUT);
+    pinMode(GPIO_PIN_RIGHT, INPUT);
+    pullUpDnControl(GPIO_PIN_UP, PUD_UP);
+    pullUpDnControl(GPIO_PIN_DOWN, PUD_UP);
+    pullUpDnControl(GPIO_PIN_LEFT, PUD_UP);
 }
