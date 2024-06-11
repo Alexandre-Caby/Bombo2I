@@ -18,7 +18,7 @@
  * @def PORT_SVC
  * @see INADDR_SVC
  */
-#define PORT_SVC 5000
+#define PORT_SVC 8080
 #define INADDR_SVC "0.0.0.0"
 
 /**

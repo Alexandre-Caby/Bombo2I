@@ -60,7 +60,7 @@ void recevoir(socket_t *sockEch, generic quoi, pFct deSerial)
     if (deSerial != NULL)
     {
         // Call the deserialization function, passing the buffer and the address of quoi
-        (*deSerial)((generic)buffer, quoi);
+        (*deSerial)(buffer, quoi);
     }
     else
     {
@@ -78,32 +78,70 @@ void recevoir(socket_t *sockEch, generic quoi, pFct deSerial)
  */
 void deserial_string(generic buffer, generic quoi)
 {
-    // The buffer is a char with this format: "code-message-arg1-arg2-...-argn"
-    char *code_str = strtok((char *)buffer, "-");
-    char *message = strtok(NULL, "-");
-    char *args[10];
-    args[0] = strtok(NULL, "-");
-    int arg_count = 1;
-    if (args[0] != NULL)
-    {
-        char *arg = strtok(NULL, "-");
-        while (arg != NULL && arg_count < 10)
-        {
-            args[arg_count] = arg;
-            arg = strtok(NULL, "-");
-            arg_count++;
-        }
-    }
+    // The buffer is a char with this format: "message"
+    char *message = (char *)buffer;
+    strcpy((char *)quoi, message);
+}
 
-    message_t *msg = (message_t *)quoi;
+/**
+ * function serial_long_int
+ * @brief function to serialize the message as an integer
+ * @param buffer - buffer to store the message
+ * @param quoi - message to serialize
+ * @return void
+ */
+void serial_long_int(generic buffer, generic args)
+{
+    // serialize the long int as a string in the buffer
+    sprintf(buffer, "%ld", *(long int *)args);
+}
 
-    msg->code = atoi(code_str);
-    strcpy(msg->message, message);
-    if (args[0] != NULL)
-    {
-        for (int i = 0; i < arg_count; i++)
-        {
-            strcpy(msg->args[i], args[i]);
-        }
-    }
+/**
+ * function deserial_long_int
+ * @brief function to deserialize the message
+ * @param quoi - message to serialize
+ * @param args - arguments to serialize
+ * @return void
+ */
+void deserial_long_int(generic buffer, generic quoi)
+{
+    // Deserialize the buffer as a long int
+    sscanf(buffer, "%ld", (long int *)quoi);
+}
+
+/**
+ * function deserial_map
+ * @brief function to deserialize the map 
+ * @param quoi - message to serialize
+ * @param args - arguments to serialize
+ * @return void
+ */
+void deserial_map(generic buffer, generic quoi)
+{
+    Map *map = (Map *)quoi;
+    memcpy(map, buffer, sizeof(Map));
+}
+
+/**
+ * funtion serial_point
+ * @brief function to serialize the message as a point
+ * @param buffer - buffer to store the message
+ * @param args - arguments to deserialize
+ * @return void
+ */
+void serial_point(generic buffer, generic args){
+    Point *point = (Point *)args;
+    memcpy(buffer, point, sizeof(Point));
+}
+
+/**
+ * function deserial_point
+ * @brief Function to deserialize the message as a point
+ * 
+ * @param buffer 
+ * @param quoi 
+ * @return void
+ */
+void deserial_point(generic buffer, generic quoi) {
+    memcpy(quoi, buffer, sizeof(Point));
 }

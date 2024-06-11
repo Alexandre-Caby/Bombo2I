@@ -7,18 +7,47 @@
  * @return int
  */
 int main() {
+    socket_t sock = createAndConnectToServer();
+    if(sock.fd == -1) {
+        printf("Could not connect to the server\n");
+        return 1;
+    }
+
+    // Receive the welcome message from the server
+    message_t welcome_message;
+    recevoir(&sock, &welcome_message, deserial_string);
+    printf("%s", welcome_message.buffer);
+
     // Initialize the random number generator
     srand(time(NULL));
-    // Create a new map
-    Map *map = map_new(MAX_MAP_WIDTH, MAX_MAP_HEIGHT);
-    generateMap(map);
 
-    // Create a player
+    // Receive the map dimensions from the server
+    // int map_width, map_height;
+    // recevoir(&sock, &map_width, deserial_long_int);
+    // recevoir(&sock, &map_height, deserial_long_int);
+    // printf("Map dimensions: %d x %d\n", map_width, map_height);
+    // // Create a new map based on the received dimensions
+    Map *map = map_new(MAX_MAP_WIDTH, MAX_MAP_HEIGHT);
+
+    // // Receive the map cells from the server
+    // for (int y = 0; y < map->height; y++) {
+    //     for (int x = 0; x < map->width; x++) {
+    //         int cell;
+    //         recevoir(&sock, &cell, deserial_long_int);
+    //         map->cells[y * map->width + x] = cell;
+    //     }
+    // }
+
+    recevoir(&sock, map, deserial_long_int);
+    printf("Map received\n");
+
+    // Receive the player role from the server
     Player player;
-    initPlayer(&player, map);
+    recevoir(&sock, &player, deserial_string);
+    printf("You are a %s\n", player.role == BOMBER ? "BOMBER" : "MINE_CLEARER");
 
     // Initialize GPIO pins
-    gpioInitialise();
+    // gpioInitialise();
 
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -59,67 +88,104 @@ int main() {
 
     Uint32 time = 0;
     Uint32 bombPlacementTime = 5000;
-    int running = 1;
-    SDL_Event event;
-    while (running) {
+    while (1) {
+        // Handle the input from the user and send it to the server
+        SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT || event.key.keysym.sym == SDLK_ESCAPE) {
-                running = 0;
+                // Exit the game if the user closes the window or presses the ESC key
+                break;
             } else if (event.type == SDL_KEYDOWN) {
-                handleInput(&player, map, event);
-                if (event.key.keysym.sym == SDLK_SPACE) {
-                    if (map->cells[player.y * map->width + player.x] == PATH) {
-                        if (player.role == BOMBER) {
-                            if(SDL_GetTicks() - time > bombPlacementTime) {
-                                time = SDL_GetTicks();
-                                placePoint(map, renderer, font, player.x, player.y, BOMB);
+                // Handle player input based on the key pressed
+                int action = -1; // Default action
+                switch (event.key.keysym.sym) {
+                    case SDLK_UP:
+                        action = MOVE_UP;
+                        break;
+                    case SDLK_DOWN:
+                        action = MOVE_DOWN;
+                        break;
+                    case SDLK_LEFT:
+                        action = MOVE_LEFT;
+                        break;
+                    case SDLK_RIGHT:
+                        action = MOVE_RIGHT;
+                        break;
+                    case SDLK_SPACE:
+                        if (map->cells[player.y * map->width + player.x] == PATH) {
+                            if (player.role == BOMBER) {
+                                if (SDL_GetTicks() - time > bombPlacementTime) {
+                                    time = SDL_GetTicks();
+                                    action = PLACE_BOMB;
+                                } else {
+                                    showMessage(renderer, font, "Cannot place point: You must wait 5 seconds between each bombing.");
+                                }
                             } else {
-                                showMessage(renderer, font, "Cannot place point: You must wait 5 seconds between each bombing.");
+                                action = DEACTIVATE_BOMB;
                             }
-                        } else {
-                            placePoint(map, renderer, font, player.x, player.y, DEACTIVATED_BOMB);
                         }
-                    }
+                        break;
+                    default:
+                        // Error message for invalid key presses
+                        showMessage(renderer, font, "Invalid key pressed. Use the arrow keys to move and the space bar to place a bomb.");
+                        break;
                 }
-            } else if (event.type == SDL_USEREVENT+1) {
-                if(event.user.code == GPIO_PIN_UP || event.user.code == GPIO_PIN_DOWN || event.user.code == GPIO_PIN_LEFT || event.user.code == GPIO_PIN_RIGHT) {
-                    handleInput(&player, map, event);
+
+                // Send the action to the server
+                if (action != -1) {
+                    envoyer(&sock, &action, NULL);
                 }
             }
         }
 
-        if(digitalRead(GPIO_PIN_UP) == HIGH) {
-            event.type = SDL_USEREVENT+1;
-            event.user.code = GPIO_PIN_UP;
-            SDL_PushEvent(&event);
-            printf("up\n");
-        } else if(digitalRead(GPIO_PIN_DOWN) == HIGH) {
-            event.type = SDL_USEREVENT+1;
-            event.user.code = GPIO_PIN_DOWN;
-            SDL_PushEvent(&event);
-            printf("down\n");
-        } else if(digitalRead(GPIO_PIN_LEFT) == HIGH) {
-            event.type = SDL_USEREVENT+1;
-            event.user.code = GPIO_PIN_LEFT;
-            SDL_PushEvent(&event);
-            printf("left\n");
-        } else if(digitalRead(GPIO_PIN_RIGHT) == HIGH) {
-            event.type = SDL_USEREVENT+1;
-            event.user.code = GPIO_PIN_RIGHT;
-            SDL_PushEvent(&event);
-            printf("right\n");
-        }
+        // Receive the updated player position from the server
+        recevoir(&sock, &player, NULL);
 
-        handleInput(&player, map, event);
-
+        // Render game elements
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         SDL_RenderClear(renderer);
-
         drawMap(renderer, map, font);
-
         renderPlayer(renderer, &player);
-
         SDL_RenderPresent(renderer);
+
+        // Condition to exit the game : 
+        // all bombs are deactivated = victory for the mine clearer 
+        // time is up (1 minute) = victory for the bomber
+        // Prerequisite : 5 bombs must be placed on the map before counting the time 
+        // if the player is a bomber and the time is up, the bomber wins
+        // if the player is a mine clearer and all bombs are deactivated within the time limit, the mine clearer wins
+        int bombCount = 0;
+        if (player.role == MINE_CLEARER) {
+            int numBombs = 0;
+            for (int i = 0; i < map->width * map->height; i++) {
+                if (map->cells[i] == DEACTIVATED_BOMB) {
+                    numBombs++;
+                }
+            }
+            if (numBombs == 5) {
+                showMessage(renderer, font, "All bombs are deactivated. Victory for the mine clearer !");
+                break;
+            }
+        }
+
+        if(player.role == BOMBER) {
+            for (int i = 0; i < map->width * map->height; i++) {
+                if (map->cells[i] == BOMB) {
+                    bombCount++;
+                }
+            }
+        }
+        if (bombCount == 5) {
+            showMessage(renderer, font, "All bombs are placed. The time starts now !");
+            // start the timer
+            Uint32 startTime = SDL_GetTicks();
+
+            if (SDL_GetTicks() - startTime > 60000) {
+                showMessage(renderer, font, "Time is up. Victory for the bomber !");
+                break;
+            }
+        }
+
     }
 
     TTF_CloseFont(font);
@@ -127,6 +193,8 @@ int main() {
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
+    close(sock.fd);
+
     return 0;
 }
 
@@ -171,10 +239,10 @@ void drawMap(SDL_Renderer *renderer, Map *map, TTF_Font *font) {
             // Define the background color based on the cell type
             switch (map->cells[y * map->width + x]) {
                 case WALL:
-                    SDL_SetRenderDrawColor(renderer, bgColor.r, bgColor.g, bgColor.b, bgColor.a);
+                    SDL_SetRenderDrawColor(renderer, bgColor.r, bgColor.g, bgColor.b, bgColor.a); // Black for the wall
                     break;
                 case PATH:
-                    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+                    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // White for the path
                     break;
                 case BOMB:
                     SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // Red for the bomb
@@ -247,63 +315,6 @@ void carvePathFrom(int x, int y, Map *map) {
             map->cells[(ny - dy) * map->width + (nx - dx)] = PATH;
             map->cells[ny * map->width + nx] = PATH;
             carvePathFrom(nx, ny, map);
-        }
-    }
-}
-
-/**
- * function generateMap
- * @brief Generate a map with multiple paths (and on some paths no walls)
- * 
- * @param map 
- * @return void
- */
-void generateMap(Map *map) {
-    // Initialize the map with walls
-    for (int y = 0; y < map->height; y++) {
-        for (int x = 0; x < map->width; x++) {
-            map->cells[y * map->width + x] = WALL;
-        }
-    }
-
-    // Create multiple paths by carving out a grid-like pattern
-    for (int y = 1; y < map->height; y += 2) {
-        for (int x = 1; x < map->width; x += 2) {
-            map->cells[y * map->width + x] = PATH;
-            if (x + 1 < map->width) {
-                map->cells[y * map->width + x + 1] = PATH; // carve right
-            }
-            if (y + 1 < map->height) {
-                map->cells[(y + 1) * map->width + x] = PATH; // carve down
-            }
-        }
-    }
-
-    // Create open areas without walls
-    for (int y = 3; y < map->height; y += 4) {
-        for (int x = 3; x < map->width; x += 4) {
-            map->cells[y * map->width + x] = PATH;
-            if (x + 1 < map->width) {
-                map->cells[y * map->width + x + 1] = PATH; // open right
-            }
-            if (y + 1 < map->height) {
-                map->cells[(y + 1) * map->width + x] = PATH; // open down
-            }
-            if (x - 1 > 0) {
-                map->cells[y * map->width + x - 1] = PATH; // open left
-            }
-            if (y - 1 > 0) {
-                map->cells[(y - 1) * map->width + x] = PATH; // open up
-            }
-        }
-    }
-
-    // Add some random obstacles 
-    for (int y = 1; y < map->height; y++) {
-        for (int x = 1; x < map->width; x++) {
-            if (map->cells[y * map->width + x] == PATH && rand() % 100 < 4) {
-                map->cells[y * map->width + x] = WALL;
-            }
         }
     }
 }
@@ -466,44 +477,6 @@ void showMessage(SDL_Renderer *renderer, TTF_Font *font, const char *message) {
     SDL_RenderClear(renderer); // Clear the message after 2 seconds
 }
 
-/**
- * function initPlayer
- * @brief Initialize the player position
- * 
- * @param player 
- * @param map 
- * @return void
- */
-void initPlayer(Player *player, Map *map) {
-    // Definethe player's role and BOMBing position
-    player->role = rand() % 2 == 0 ? BOMBER : MINE_CLEARER;
-    player->x = 1;
-    player->y = 1;
-    while (map->cells[player->y * map->width + player->x] == WALL) {
-        player->x++;
-    }
-}
-
-/**
- * function movePlayer
- * @brief Move the player on the map with the arrow keys or gpio buttons
- * 
- * @param map
- * @param player
- * @param dx
- * @param dy
- * @return void
- */
-void movePlayer(Player *player, Map *map, int dx, int dy) {
-    int newX = player->x + dx;
-    int newY = player->y + dy;
-
-    // Check if the new position is within the map boundaries and is not a wall
-    if (newX >= 0 && newX < map->width && newY >= 0 && newY < map->height && map->cells[newY * map->width + newX] != WALL) {
-        player->x = newX;
-        player->y = newY;
-    }
-}
 
 /**
  * function handleInput
@@ -514,40 +487,39 @@ void movePlayer(Player *player, Map *map, int dx, int dy) {
  * @param event 
  * @return void
  */
-void handleInput(Player *player, Map *map, SDL_Event event) {
-    if (event.type == SDL_KEYDOWN) {
-        switch (event.key.keysym.sym) {
-            case SDLK_UP:
-                movePlayer(player, map, 0, -1);
-                break;
-            case SDLK_DOWN:
-                movePlayer(player, map, 0, 1);
-                break;
-            case SDLK_LEFT:
-                movePlayer(player, map, -1, 0);
-                break;
-            case SDLK_RIGHT:
-                movePlayer(player, map, 1, 0);
-                break;
-        }
-    }
-
-    if (event.type == SDL_USEREVENT+1) {
-        if (event.user.code == GPIO_PIN_UP) {
-            printf("Pressed up\n");
-            movePlayer(player, map, 0, -1);
-        } else if (event.user.code == GPIO_PIN_DOWN) {
-            printf("Pressed down\n");
-            movePlayer(player, map, 0, 1);
-        } else if (event.user.code == GPIO_PIN_LEFT) {
-            printf("Pressed left\n");
-            movePlayer(player, map, -1, 0);
-        } else if (event.user.code == GPIO_PIN_RIGHT) {
-            printf("Pressed right\n");
-            movePlayer(player, map, 1, 0);
-        }
-    }
-}
+// void handleInput(Player *player, Map *map, SDL_Event event) {
+//     if (event.type == SDL_KEYDOWN) {
+//         switch (event.key.keysym.sym) {
+//             case SDLK_UP:
+//                 movePlayer(player, map, 0, -1);
+//                 break;
+//             case SDLK_DOWN:
+//                 movePlayer(player, map, 0, 1);
+//                 break;
+//             case SDLK_LEFT:
+//                 movePlayer(player, map, -1, 0);
+//                 break;
+//             case SDLK_RIGHT:
+//                 movePlayer(player, map, 1, 0);
+//                 break;
+//         }
+//     }
+//     // if (event.type == SDL_USEREVENT+1) {
+//     //     if (event.user.code == GPIO_PIN_UP) {
+//     //         printf("Pressed up\n");
+//     //         movePlayer(player, map, 0, -1);
+//     //     } else if (event.user.code == GPIO_PIN_DOWN) {
+//     //         printf("Pressed down\n");
+//     //         movePlayer(player, map, 0, 1);
+//     //     } else if (event.user.code == GPIO_PIN_LEFT) {
+//     //         printf("Pressed left\n");
+//     //         movePlayer(player, map, -1, 0);
+//     //     } else if (event.user.code == GPIO_PIN_RIGHT) {
+//     //         printf("Pressed right\n");
+//     //         movePlayer(player, map, 1, 0);
+//     //     }
+//     // }
+// }
 
 /**
  * function renderPlayer
@@ -573,13 +545,13 @@ void renderPlayer(SDL_Renderer *renderer, Player *player) {
  * 
  * @return void
  */
-void gpioInitialise() {
-    wiringPiSetupGpio();
-    pinMode(GPIO_PIN_UP, INPUT);
-    pinMode(GPIO_PIN_DOWN, INPUT);
-    pinMode(GPIO_PIN_LEFT, INPUT);
-    pinMode(GPIO_PIN_RIGHT, INPUT);
-    pullUpDnControl(GPIO_PIN_UP, PUD_UP);
-    pullUpDnControl(GPIO_PIN_DOWN, PUD_UP);
-    pullUpDnControl(GPIO_PIN_LEFT, PUD_UP);
-}
+// void gpioInitialise() {
+//     wiringPiSetupGpio();
+//     pinMode(GPIO_PIN_UP, INPUT);
+//     pinMode(GPIO_PIN_DOWN, INPUT);
+//     pinMode(GPIO_PIN_LEFT, INPUT);
+//     pinMode(GPIO_PIN_RIGHT, INPUT);
+//     pullUpDnControl(GPIO_PIN_UP, PUD_UP);
+//     pullUpDnControl(GPIO_PIN_DOWN, PUD_UP);
+//     pullUpDnControl(GPIO_PIN_LEFT, PUD_UP);
+// }

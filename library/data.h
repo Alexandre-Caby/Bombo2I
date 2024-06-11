@@ -14,6 +14,10 @@
  * 
  */
 #define MAX_BUFFER 1024
+#define MAX_MAP_WIDTH 50
+#define MAX_MAP_HEIGHT 25
+#define MAX_MAP_SIZE MAX_MAP_WIDTH * MAX_MAP_HEIGHT
+#define CELL_SIZE 24
 
 /*******************************************/
 /*		S T R U C T U R E S                */
@@ -25,10 +29,21 @@
  */
 typedef struct
 {
-    int code;
-    char message[MAX_BUFFER];
-    char args[MAX_BUFFER][10];
+    char buffer[MAX_BUFFER];
+    int size;
 } message_t;
+
+typedef struct {
+    int x;
+    int y;
+    int state;
+} Point;
+
+typedef struct {
+    int width;
+    int height;
+    int cells[MAX_MAP_SIZE];
+} Map;
 
 /**
  * @brief structure to store the socket
@@ -84,5 +99,53 @@ void recevoir(socket_t *sockEch, generic quoi, pFct deSerial);
  * @return void
  */
 void deserial_string(generic buffer, generic quoi);
+
+/**
+ * function serial_int
+ * @brief Function to serialize the message as an integer
+ * @param buffer - buffer to store the message
+ * @param args - arguments to serialize
+ * @return void
+ */
+void serial_long_int(generic buffer, generic args);
+
+/**
+ * function deserial_int
+ * @brief Function to deserialize the message as an integer
+ * @param buffer - buffer to store the message
+ * @param quoi - message to deserialize
+ * @return void
+ */
+void deserial_long_int(generic buffer, generic quoi);
+
+/**
+ * function deserial_map
+ * @brief Function to deserialize the map
+ * 
+ * @param buffer 
+ * @param quoi 
+ * @return void
+ */
+void deserial_map(generic buffer, generic quoi);
+
+/**
+ * funtion serial_point
+ * @brief Function to serialize the message as a point
+ * 
+ * @param buffer 
+ * @param args 
+ * @return void
+ */
+void serial_point(generic buffer, generic args);
+
+/**
+ * function deserial_point
+ * @brief Function to deserialize the message as a point
+ * 
+ * @param buffer 
+ * @param quoi
+ * @return void
+ */
+void deserial_point(generic buffer, generic quoi);
 
 #endif // DATA_H

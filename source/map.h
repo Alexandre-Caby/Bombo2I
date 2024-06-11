@@ -3,24 +3,29 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <time.h>
-#include <wiringPi.h>
+// #include <wiringPi.h>
+#include "../library/data.h"
+#include "../library/session.h"
 
 // --- Constants ---
-#define MAX_MAP_WIDTH 45
-#define MAX_MAP_HEIGHT 20
+#define ADDRESS_SERVER "0.0.0.0"
+#define PORT_SERVER 8080
+
+#define MAX_MAP_WIDTH 50
+#define MAX_MAP_HEIGHT 25
 #define MAX_MAP_SIZE MAX_MAP_WIDTH * MAX_MAP_HEIGHT
 #define CELL_SIZE 24
-#define GPIO_PIN_UP 37 // GPIO pin for the up button
-#define GPIO_PIN_DOWN 33 // GPIO pin for the down button
-#define GPIO_PIN_LEFT 22 // GPIO pin for the left button
-#define GPIO_PIN_RIGHT 35 // GPIO pin for the right button
+// #define GPIO_PIN_UP 37 // GPIO pin for the up button
+// #define GPIO_PIN_DOWN 33 // GPIO pin for the down button
+// #define GPIO_PIN_LEFT 22 // GPIO pin for the left button
+// #define GPIO_PIN_RIGHT 35 // GPIO pin for the right button
 
 // --- Structures ---
-typedef struct {
-    int width;
-    int height;
-    int cells[MAX_MAP_SIZE];
-} Map;
+// typedef struct {
+//     int width;
+//     int height;
+//     int cells[MAX_MAP_SIZE];
+// } Map;
 
 typedef enum {
     WALL,
@@ -30,14 +35,13 @@ typedef enum {
 } Cell;
 
 typedef enum {
-    WHITE,
-    RED,
-    GREEN,
-    BLUE,
-    YELLOW,
-    ORANGE,
-    PURPLE
-} CellColor;
+    MOVE_UP,
+    MOVE_DOWN,
+    MOVE_LEFT,
+    MOVE_RIGHT,
+    PLACE_BOMB,
+    DEACTIVATE_BOMB
+} Action;
 
 typedef enum {
     BOMBER,
@@ -54,7 +58,6 @@ typedef struct {
 Map* map_new(int width, int height);
 void drawMap(SDL_Renderer *renderer, Map *map, TTF_Font *font);
 void carvePathFrom(int x, int y, Map *map);
-void generateMap(Map *map);
 void setSpecialPoint(Map *map, int x, int y, int state);
 int isAccessible(Map *map, int x, int y);
 void placePoint(Map *map, SDL_Renderer *renderer, TTF_Font *font, int x, int y, int state);
@@ -64,4 +67,4 @@ void initPlayer(Player *player, Map *map);
 void movePlayer(Player *player, Map *map, int dx, int dy);
 void handleInput(Player *player, Map *map, SDL_Event event);
 void renderPlayer(SDL_Renderer *renderer, Player *player);
-void gpioInitialise();
+// void gpioInitialise();
