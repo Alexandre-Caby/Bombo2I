@@ -110,19 +110,6 @@ void deserial_long_int(generic buffer, generic quoi)
 }
 
 /**
- * function deserial_map
- * @brief function to deserialize the map 
- * @param quoi - message to serialize
- * @param args - arguments to serialize
- * @return void
- */
-void deserial_map(generic buffer, generic quoi)
-{
-    Map *map = (Map *)quoi;
-    memcpy(map, buffer, sizeof(Map));
-}
-
-/**
  * funtion serial_point
  * @brief function to serialize the message as a point
  * @param buffer - buffer to store the message

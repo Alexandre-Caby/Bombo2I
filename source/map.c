@@ -1,5 +1,9 @@
 #include "map.h"
 
+// --- Global variables ---
+pthread_mutex_t map_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t renderer_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 /**
  * function main
  * @brief Main function
@@ -21,30 +25,38 @@ int main() {
     // Initialize the random number generator
     srand(time(NULL));
 
-    // Receive the map dimensions from the server
-    // int map_width, map_height;
-    // recevoir(&sock, &map_width, deserial_long_int);
-    // recevoir(&sock, &map_height, deserial_long_int);
-    // printf("Map dimensions: %d x %d\n", map_width, map_height);
-    // // Create a new map based on the received dimensions
+    // Create a new map
     Map *map = map_new(MAX_MAP_WIDTH, MAX_MAP_HEIGHT);
+    // Receive map dimensions from server
+    int map_size[2];
+    recv(sock.fd, map_size, 2 * sizeof(int), 0);
+    map->width = map_size[0];
+    map->height = map_size[1];
+    printf("Map received, width: %d, height: %d\n", map->width, map->height);
 
-    // // Receive the map cells from the server
-    // for (int y = 0; y < map->height; y++) {
-    //     for (int x = 0; x < map->width; x++) {
-    //         int cell;
-    //         recevoir(&sock, &cell, deserial_long_int);
-    //         map->cells[y * map->width + x] = cell;
-    //     }
-    // }
+    // Receive map cells from server
+    int *received_cells = (int *)malloc(map->width * map->height * sizeof(int));
+    recv(sock.fd, received_cells, map->width * map->height * sizeof(int), 0);
 
-    recevoir(&sock, map, deserial_long_int);
-    printf("Map received\n");
+    // Copy received cells to map->cells
+    memcpy(map->cells, received_cells, map->width * map->height * sizeof(int));
+
+    // Free allocated memory for received cells
+    free(received_cells);
 
     // Receive the player role from the server
     Player player;
-    recevoir(&sock, &player, deserial_string);
-    printf("You are a %s\n", player.role == BOMBER ? "BOMBER" : "MINE_CLEARER");
+    ssize_t received_bytes = recv(sock.fd, &player, sizeof(Player), 0);
+    if (received_bytes <= 0) {
+        perror("Failed to receive player data");
+        // Handle error appropriately
+    } else if (received_bytes != sizeof(Player)) {
+        fprintf(stderr, "Partial player data received\n");
+        // Handle error appropriately
+    }
+    
+    printf("You are a %s\n", player.role == BOMBER ? "bomber" : "mine clearer");
+    sleep(1);
 
     // Initialize GPIO pins
     // gpioInitialise();
@@ -86,106 +98,148 @@ int main() {
         return 1;
     }
 
+    // Render game elements
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderClear(renderer);
+    drawMap(renderer, map, font);
+    renderPlayer(renderer, &player);
+    SDL_RenderPresent(renderer);
+
+    // Create the thread data for the receiveUpdates thread
+    recv_thread_data_t *recv_data = malloc(sizeof(recv_thread_data_t));
+    if (!recv_data) {
+        fprintf(stderr, "Failed to allocate memory for thread data\n");
+        TTF_CloseFont(font);
+        TTF_Quit();
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+    recv_data->sock_fd = sock.fd;
+    recv_data->map = map;
+
+    // Create the receiveUpdates thread
+    pthread_t recv_thread;
+    if (pthread_create(&recv_thread, NULL, receiveUpdates, recv_data) != 0) {
+        fprintf(stderr, "Failed to create receiveUpdates thread\n");
+        free(recv_data);
+        TTF_CloseFont(font);
+        TTF_Quit();
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+
     Uint32 time = 0;
     Uint32 bombPlacementTime = 5000;
-    while (1) {
+    Uint32 bombDeactivationTime = 4000;
+    int running = 1;
+    while (running) {
         // Handle the input from the user and send it to the server
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_QUIT || event.key.keysym.sym == SDLK_ESCAPE) {
-                // Exit the game if the user closes the window or presses the ESC key
-                break;
-            } else if (event.type == SDL_KEYDOWN) {
-                // Handle player input based on the key pressed
-                int action = -1; // Default action
-                switch (event.key.keysym.sym) {
-                    case SDLK_UP:
-                        action = MOVE_UP;
+            switch (event.type) {
+                case SDL_QUIT:
+                    running = 0;
+                    // Send a disconnect message to the server
+                    int disconnect = -1;
+                    send(sock.fd, &disconnect, sizeof(int), 0);
+                    break;
+                case SDL_KEYDOWN:
+                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                        // Exit the game if the user closes the window or presses the ESC key
+                        running = 0;
+                        // Send a disconnect message to the server
+                        int disconnect = -1;
+                        send(sock.fd, &disconnect, sizeof(int), 0);
                         break;
-                    case SDLK_DOWN:
-                        action = MOVE_DOWN;
-                        break;
-                    case SDLK_LEFT:
-                        action = MOVE_LEFT;
-                        break;
-                    case SDLK_RIGHT:
-                        action = MOVE_RIGHT;
-                        break;
-                    case SDLK_SPACE:
-                        if (map->cells[player.y * map->width + player.x] == PATH) {
-                            if (player.role == BOMBER) {
-                                if (SDL_GetTicks() - time > bombPlacementTime) {
-                                    time = SDL_GetTicks();
-                                    action = PLACE_BOMB;
-                                } else {
-                                    showMessage(renderer, font, "Cannot place point: You must wait 5 seconds between each bombing.");
+                    } else {
+                        // Handle player input based on the key pressed
+                        int action = -1; // Default action
+                        switch (event.key.keysym.sym) {
+                            case SDLK_UP:
+                                action = MOVE_UP;
+                                break;
+                            case SDLK_DOWN:
+                                action = MOVE_DOWN;
+                                break;
+                            case SDLK_LEFT:
+                                action = MOVE_LEFT;
+                                break;
+                            case SDLK_RIGHT:
+                                action = MOVE_RIGHT;
+                                break;
+                            case SDLK_SPACE:
+                                if (player.role == BOMBER) {
+                                    if(map->cells[player.y * map->width + player.x] == BOMB) {
+                                        showMessage(renderer, font, "Cannot place point: The cell already contains a bomb.");
+                                        break;
+                                    }
+                                    if (SDL_GetTicks() - time > bombPlacementTime) {
+                                        time = SDL_GetTicks();
+                                        action = PLACE_BOMB;
+                                    } else {
+                                        showMessage(renderer, font, "Cannot place point: You must wait 5 seconds between each bombing.");
+                                    }
+                                } else if (player.role == MINE_CLEARER) {
+                                    if(SDL_GetTicks() - time > bombDeactivationTime) {
+                                        time = SDL_GetTicks();
+                                        action = DEACTIVATE_BOMB;
+                                    } else {
+                                        showMessage(renderer, font, "Cannot deactivate bomb: You must wait 4 seconds between each deactivation.");
+                                    }
                                 }
-                            } else {
-                                action = DEACTIVATE_BOMB;
-                            }
+                                break;
+                            default:
+                                // Error message for invalid key presses
+                                showMessage(renderer, font, "Invalid key pressed. Use the arrow keys to move and the space bar to place a bomb.");
+                                break;
                         }
-                        break;
-                    default:
-                        // Error message for invalid key presses
-                        showMessage(renderer, font, "Invalid key pressed. Use the arrow keys to move and the space bar to place a bomb.");
-                        break;
-                }
 
-                // Send the action to the server
-                if (action != -1) {
-                    envoyer(&sock, &action, NULL);
-                }
-            }
+                        handleInput(&player, map, action);
+                        if (action == PLACE_BOMB || action == DEACTIVATE_BOMB) {
+                            placePoint(map, renderer, font, player.x, player.y, action == PLACE_BOMB ? BOMB : DEACTIVATED_BOMB, sock.fd);
+                        }
+                    }
+                    break;
+                case SDL_USEREVENT:
+                    switch (event.user.code) {
+                        case 1:
+                            // Render the updated map
+                            pthread_mutex_lock(&renderer_mutex);
+                            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+                            SDL_RenderClear(renderer);
+                            drawMap(renderer, map, font);
+                            renderPlayer(renderer, &player);
+                            SDL_RenderPresent(renderer);
+                            pthread_mutex_unlock(&renderer_mutex);
+                            break;
+                        case 2:
+                            // Display the message received from the server
+                            showMessage(renderer, font, event.user.data1);
+                            break;
+                        case 3:
+                            // Display the game ended message received from the server
+                            showMessage(renderer, font, event.user.data1);
+                            SDL_Delay(2000); // Display message for 2 seconds
+                            running = 0;
+                            break;
+                    }
+                    break;
+            }          
         }
-
-        // Receive the updated player position from the server
-        recevoir(&sock, &player, NULL);
-
-        // Render game elements
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-        SDL_RenderClear(renderer);
-        drawMap(renderer, map, font);
-        renderPlayer(renderer, &player);
-        SDL_RenderPresent(renderer);
-
-        // Condition to exit the game : 
-        // all bombs are deactivated = victory for the mine clearer 
-        // time is up (1 minute) = victory for the bomber
-        // Prerequisite : 5 bombs must be placed on the map before counting the time 
-        // if the player is a bomber and the time is up, the bomber wins
-        // if the player is a mine clearer and all bombs are deactivated within the time limit, the mine clearer wins
-        int bombCount = 0;
-        if (player.role == MINE_CLEARER) {
-            int numBombs = 0;
-            for (int i = 0; i < map->width * map->height; i++) {
-                if (map->cells[i] == DEACTIVATED_BOMB) {
-                    numBombs++;
-                }
-            }
-            if (numBombs == 5) {
-                showMessage(renderer, font, "All bombs are deactivated. Victory for the mine clearer !");
-                break;
-            }
+        if (SDL_USEREVENT != event.type) {
+            // Render the updated map
+            pthread_mutex_lock(&renderer_mutex);
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            SDL_RenderClear(renderer);
+            drawMap(renderer, map, font);
+            renderPlayer(renderer, &player);
+            SDL_RenderPresent(renderer);
+            pthread_mutex_unlock(&renderer_mutex);
         }
-
-        if(player.role == BOMBER) {
-            for (int i = 0; i < map->width * map->height; i++) {
-                if (map->cells[i] == BOMB) {
-                    bombCount++;
-                }
-            }
-        }
-        if (bombCount == 5) {
-            showMessage(renderer, font, "All bombs are placed. The time starts now !");
-            // start the timer
-            Uint32 startTime = SDL_GetTicks();
-
-            if (SDL_GetTicks() - startTime > 60000) {
-                showMessage(renderer, font, "Time is up. Victory for the bomber !");
-                break;
-            }
-        }
-
     }
 
     TTF_CloseFont(font);
@@ -281,45 +335,6 @@ void drawMap(SDL_Renderer *renderer, Map *map, TTF_Font *font) {
 }
 
 /**
- * function carvePathFrom
- * @brief Carve a path from a given point
- * 
- * @param x 
- * @param y 
- * @param map
- * @return void
- */
-void carvePathFrom(int x, int y, Map *map) {
-    int directions[] = { 0, 1, 2, 3 };
-    // Shuffle the directions array
-    for (int i = 0; i < 4; i++) {
-        int r = rand() % 4;
-        int temp = directions[i];
-        directions[i] = directions[r];
-        directions[r] = temp;
-    }
-
-    for (int i = 0; i < 4; i++) {
-        int dx = 0, dy = 0;
-        switch (directions[i]) {
-            case 0: dy = -1; break;
-            case 1: dy = 1; break;
-            case 2: dx = -1; break;
-            case 3: dx = 1; break;
-        }
-
-        int nx = x + 2 * dx;
-        int ny = y + 2 * dy;
-
-        if (nx >= 0 && nx < map->width && ny >= 0 && ny < map->height && map->cells[ny * map->width + nx] == WALL) {
-            map->cells[(ny - dy) * map->width + (nx - dx)] = PATH;
-            map->cells[ny * map->width + nx] = PATH;
-            carvePathFrom(nx, ny, map);
-        }
-    }
-}
-
-/**
  * function setSpecialPoint
  * @brief Set a special point on the map
  * 
@@ -350,8 +365,8 @@ int isAccessible(Map *map, int x, int y) {
         return 0;
     }
 
-    // Check if the cell itself is a path
-    if (map->cells[y * map->width + x] != PATH) {
+    // Check if the cell itself is a path or a bomb
+    if (map->cells[y * map->width + x] != PATH && map->cells[y * map->width + x] != BOMB) {
         return 0;
     }
 
@@ -395,36 +410,37 @@ int isAccessible(Map *map, int x, int y) {
  * @brief Place a point on the map
  * 
  * @param map 
+ * @param renderer 
+ * @param font 
  * @param x 
  * @param y 
- * @param state 
+ * @param action 
+ * @param sock 
  * @return void
  */
-void placePoint(Map *map, SDL_Renderer *renderer, TTF_Font *font, int x, int y, int state) {
-    int count = 0;
-    for (int i = 0; i < map->width * map->height; ++i) {
-        if (map->cells[i] == BOMB || map->cells[i] == DEACTIVATED_BOMB) {
-            ++count;
-        }
-    }
-    
-    if (count >= 5) {
-        showMessage(renderer, font, "Cannot place point: Too many points ! The maximum allowed is 5.");
-        return;
-    }
-    
+void placePoint(Map *map, SDL_Renderer *renderer, TTF_Font *font, int x, int y, int action, int sock) {  
     if (!isAccessible(map, x, y)) {
         showMessage(renderer, font, "Cannot place point: The cell is not accessible.");
         return;
     }
 
-    // if it's a wall, we can't place a point
+    // If it's a wall, we can't place a point
     if (map->cells[y * map->width + x] == WALL) {
         showMessage(renderer, font, "Cannot place point: The cell is a wall.");
         return;
     }
+    printf("Placing point at (%d, %d)\n", x, y);
+    printf("Action: %d\n", action);
+
+    // If the player is a mine clearer, they can only deactivate bombs on a cell with a bomb state
+    if (action == DEACTIVATED_BOMB && map->cells[y * map->width + x] != BOMB) {
+        showMessage(renderer, font, "Cannot deactivate bomb: The cell does not contain a bomb.");
+        return;
+    }
     
-    setSpecialPoint(map, x, y, state);
+    // Send the state and coordinates of the point to the server
+    Point point = { x, y, action };
+    send(sock, &point, sizeof(Point), 0);
 }
 
 /**
@@ -441,15 +457,36 @@ void placePoint(Map *map, SDL_Renderer *renderer, TTF_Font *font, int x, int y, 
  */
 void renderText(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y, SDL_Color color, SDL_Color bgColor) {
     TTF_SetFontSize(font, 26);
+    // Render text surface
     SDL_Surface *textSurface = TTF_RenderText_Solid(font, text, color);
+    if (textSurface == NULL) {
+        fprintf(stderr, "Unable to render text surface: %s\n", TTF_GetError());
+        return;
+    }
+
+    // Create texture from surface
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, textSurface);
+    if (texture == NULL) {
+        fprintf(stderr, "Unable to create texture from surface: %s\n", SDL_GetError());
+        SDL_FreeSurface(textSurface);
+        return;
+    }
+
+    // Get text dimensions
     int text_width = textSurface->w;
     int text_height = textSurface->h;
     SDL_FreeSurface(textSurface);
 
+    // Create background rectangle
     SDL_Rect textRect = { x, y, text_width, text_height };
+    SDL_Rect bgRect = { x - 5, y - 5, text_width + 10, text_height + 10 }; // Add padding to background
+
+    // Render background rectangle
     SDL_SetRenderDrawColor(renderer, bgColor.r, bgColor.g, bgColor.b, bgColor.a);
-    SDL_RenderFillRect(renderer, &textRect);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND); // Enable blending for semi-transparent color
+    SDL_RenderFillRect(renderer, &bgRect);
+
+    // Render text
     SDL_RenderCopy(renderer, texture, NULL, &textRect);
     SDL_DestroyTexture(texture);
     TTF_SetFontSize(font, 12);
@@ -466,17 +503,32 @@ void renderText(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x,
  */
 void showMessage(SDL_Renderer *renderer, TTF_Font *font, const char *message) {
     SDL_Color color = { 255, 0, 0, 255 }; // Red color
-    // a backgournd with less opacity
-    SDL_Color bgColor = { 0, 0, 0, 150 }; // Black color
-    // Center the message on the screen dynamically based on the message length 
-    int x = MAX_MAP_WIDTH * CELL_SIZE / 2 + 100 - strlen(message) * 5;
-    int y = MAX_MAP_HEIGHT * CELL_SIZE / 4;
-    renderText(renderer, font, message, x, y, color, bgColor);
-    SDL_RenderPresent(renderer);
-    SDL_Delay(2000); // Display message for 2 seconds
-    SDL_RenderClear(renderer); // Clear the message after 2 seconds
-}
+    SDL_Color bgColor = { 0, 0, 0, 200 }; // Semi-transparent black background
+    // Measure the text dimensions
+    int textWidth, textHeight;
+    if (TTF_SizeText(font, message, &textWidth, &textHeight) != 0) {
+        fprintf(stderr, "Failed to measure text: %s\n", TTF_GetError());
+        return;
+    }
 
+    // Calculate the position to center the text on the screen
+    int screenWidth = MAX_MAP_WIDTH * CELL_SIZE;
+    int screenHeight = MAX_MAP_HEIGHT * CELL_SIZE;
+    int x = (screenWidth - textWidth) / 4;
+    int y = (screenHeight - textHeight) / 4;
+
+    // Render the text
+    renderText(renderer, font, message, x, y, color, bgColor);
+
+    // Present the renderer
+    SDL_RenderPresent(renderer);
+
+    // Display message for 2 seconds
+    SDL_Delay(2000);
+
+    // Clear the renderer
+    SDL_RenderClear(renderer);
+}
 
 /**
  * function handleInput
@@ -487,39 +539,43 @@ void showMessage(SDL_Renderer *renderer, TTF_Font *font, const char *message) {
  * @param event 
  * @return void
  */
-// void handleInput(Player *player, Map *map, SDL_Event event) {
-//     if (event.type == SDL_KEYDOWN) {
-//         switch (event.key.keysym.sym) {
-//             case SDLK_UP:
-//                 movePlayer(player, map, 0, -1);
-//                 break;
-//             case SDLK_DOWN:
-//                 movePlayer(player, map, 0, 1);
-//                 break;
-//             case SDLK_LEFT:
-//                 movePlayer(player, map, -1, 0);
-//                 break;
-//             case SDLK_RIGHT:
-//                 movePlayer(player, map, 1, 0);
-//                 break;
-//         }
-//     }
-//     // if (event.type == SDL_USEREVENT+1) {
-//     //     if (event.user.code == GPIO_PIN_UP) {
-//     //         printf("Pressed up\n");
-//     //         movePlayer(player, map, 0, -1);
-//     //     } else if (event.user.code == GPIO_PIN_DOWN) {
-//     //         printf("Pressed down\n");
-//     //         movePlayer(player, map, 0, 1);
-//     //     } else if (event.user.code == GPIO_PIN_LEFT) {
-//     //         printf("Pressed left\n");
-//     //         movePlayer(player, map, -1, 0);
-//     //     } else if (event.user.code == GPIO_PIN_RIGHT) {
-//     //         printf("Pressed right\n");
-//     //         movePlayer(player, map, 1, 0);
-//     //     }
-//     // }
-// }
+void handleInput(Player *player, Map *map, int action) {
+    switch (action) {
+        case MOVE_UP:
+            movePlayer(player, map, 0, -1);
+            break;
+        case MOVE_DOWN:
+            movePlayer(player, map, 0, 1);
+            break;
+        case MOVE_LEFT:
+            movePlayer(player, map, -1, 0);
+            break;
+        case MOVE_RIGHT:
+            movePlayer(player, map, 1, 0);
+            break;
+    }
+}
+
+/**
+ * function movePlayer
+ * @brief Move the player on the map with the arrow keys or gpio buttons
+ * 
+ * @param map
+ * @param player
+ * @param dx
+ * @param dy
+ * @return void
+ */
+void movePlayer(Player *player, Map *map, int dx, int dy) {
+    int newX = player->x + dx;
+    int newY = player->y + dy;
+
+    // Check if the new position is within the map boundaries and is not a wall
+    if (newX >= 0 && newX < map->width && newY >= 0 && newY < map->height && map->cells[newY * map->width + newX] != WALL) {
+        player->x = newX;
+        player->y = newY;
+    }
+}
 
 /**
  * function renderPlayer
@@ -555,3 +611,68 @@ void renderPlayer(SDL_Renderer *renderer, Player *player) {
 //     pullUpDnControl(GPIO_PIN_DOWN, PUD_UP);
 //     pullUpDnControl(GPIO_PIN_LEFT, PUD_UP);
 // }
+
+// --- Communication functions ---
+
+/**
+ * function receiveUpdates
+ * @brief Receive updates from the server
+ * 
+ * @param arg (wrapped arguments)
+ * @return void*
+ */
+void *receiveUpdates(void *arg) {
+    recv_thread_data_t *data = (recv_thread_data_t *)arg;
+    int sock = data->sock_fd;
+    Map *map = data->map;
+    
+    char buffer[BUFFER_SIZE];
+    ssize_t recv_size;
+
+    while (1) {
+        recv_size = recv(sock, buffer, sizeof(buffer), 0);
+        if (recv_size <= 0) {
+            if (recv_size == 0) {
+                printf("Server closed connection.\n");
+            } else {
+                perror("recv");
+            }
+            break;
+        }
+
+        buffer[recv_size] = '\0';
+
+        // Determine the type of message received
+        if (recv_size == sizeof(Point)) {
+            Point *point = (Point *)buffer;
+            
+            pthread_mutex_lock(&map_mutex);
+            setSpecialPoint(map, point->x, point->y, point->state);
+            pthread_mutex_unlock(&map_mutex);
+
+            SDL_Event event;
+            event.type = SDL_USEREVENT;
+            event.user.code = 1; // Code 1 for rendering the map
+            SDL_PushEvent(&event);
+        } else {
+            printf("Received message from server: %s\n", buffer);
+
+            if (strstr(buffer, "Game ended") != NULL) {
+                SDL_Event event;
+                event.type = SDL_USEREVENT;
+                event.user.code = 3;
+                event.user.data1 = strcpy(malloc(strlen(buffer) + 1), buffer);
+                SDL_PushEvent(&event);
+            }else{
+                // Display the message received from the server
+                SDL_Event event;
+                event.type = SDL_USEREVENT;
+                event.user.code = 2;
+                event.user.data1 = strcpy(malloc(strlen(buffer) + 1), buffer);
+                SDL_PushEvent(&event);
+            }
+        }
+    }
+
+    return NULL;
+}

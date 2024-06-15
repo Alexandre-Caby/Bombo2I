@@ -14,8 +14,8 @@
  * 
  */
 #define MAX_BUFFER 1024
-#define MAX_MAP_WIDTH 50
-#define MAX_MAP_HEIGHT 25
+#define MAX_MAP_WIDTH 48
+#define MAX_MAP_HEIGHT 24
 #define MAX_MAP_SIZE MAX_MAP_WIDTH * MAX_MAP_HEIGHT
 #define CELL_SIZE 24
 
@@ -34,16 +34,16 @@ typedef struct
 } message_t;
 
 typedef struct {
-    int x;
-    int y;
-    int state;
-} Point;
-
-typedef struct {
     int width;
     int height;
     int cells[MAX_MAP_SIZE];
 } Map;
+
+typedef struct {
+    int x;
+    int y;
+    int state;
+} Point;
 
 /**
  * @brief structure to store the socket
@@ -117,16 +117,6 @@ void serial_long_int(generic buffer, generic args);
  * @return void
  */
 void deserial_long_int(generic buffer, generic quoi);
-
-/**
- * function deserial_map
- * @brief Function to deserialize the map
- * 
- * @param buffer 
- * @param quoi 
- * @return void
- */
-void deserial_map(generic buffer, generic quoi);
 
 /**
  * funtion serial_point

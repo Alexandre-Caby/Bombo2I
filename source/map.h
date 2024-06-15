@@ -3,6 +3,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <time.h>
+#include <pthread.h>
 // #include <wiringPi.h>
 #include "../library/data.h"
 #include "../library/session.h"
@@ -10,23 +11,14 @@
 // --- Constants ---
 #define ADDRESS_SERVER "0.0.0.0"
 #define PORT_SERVER 8080
+#define BUFFER_SIZE 1024
 
-#define MAX_MAP_WIDTH 50
-#define MAX_MAP_HEIGHT 25
-#define MAX_MAP_SIZE MAX_MAP_WIDTH * MAX_MAP_HEIGHT
-#define CELL_SIZE 24
 // #define GPIO_PIN_UP 37 // GPIO pin for the up button
 // #define GPIO_PIN_DOWN 33 // GPIO pin for the down button
 // #define GPIO_PIN_LEFT 22 // GPIO pin for the left button
 // #define GPIO_PIN_RIGHT 35 // GPIO pin for the right button
 
 // --- Structures ---
-// typedef struct {
-//     int width;
-//     int height;
-//     int cells[MAX_MAP_SIZE];
-// } Map;
-
 typedef enum {
     WALL,
     PATH,
@@ -54,17 +46,23 @@ typedef struct {
     Role role;
 } Player;
 
+typedef struct {
+    int sock_fd;
+    Map *map;
+} recv_thread_data_t;
+
 // --- Functions ---
 Map* map_new(int width, int height);
 void drawMap(SDL_Renderer *renderer, Map *map, TTF_Font *font);
-void carvePathFrom(int x, int y, Map *map);
 void setSpecialPoint(Map *map, int x, int y, int state);
 int isAccessible(Map *map, int x, int y);
-void placePoint(Map *map, SDL_Renderer *renderer, TTF_Font *font, int x, int y, int state);
+void placePoint(Map *map, SDL_Renderer *renderer, TTF_Font *font, int x, int y, int action, int sock);
 void renderText(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y, SDL_Color color, SDL_Color bgColor);
 void showMessage(SDL_Renderer *renderer, TTF_Font *font, const char *message);
-void initPlayer(Player *player, Map *map);
 void movePlayer(Player *player, Map *map, int dx, int dy);
-void handleInput(Player *player, Map *map, SDL_Event event);
+void handleInput(Player *player, Map *map, int action);
+void movePlayer(Player *player, Map *map, int dx, int dy);
 void renderPlayer(SDL_Renderer *renderer, Player *player);
 // void gpioInitialise();
+void *receiveUpdates(void *arg);
+void *receiveMessages(void *arg);
