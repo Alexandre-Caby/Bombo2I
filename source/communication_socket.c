@@ -15,6 +15,23 @@ game_state_t game_state = {
 };
 
 /**
+ * function handle_sigint
+ * @brief Handle the SIGINT signal (Ctrl+C) to shut down the server
+ * 
+ * @param sig 
+ * @return void
+ */
+void handle_sigint(int sig) {
+    printf("\nServer shutting down...\n");
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (client_sockets[i].fd != 0) {
+            close(client_sockets[i].fd);
+        }
+    }
+    exit(0);
+}
+
+/**
  * function handleClient
  * @brief Handle the client requests
  * 
@@ -75,6 +92,9 @@ void *handleClient(void *data) {
                     point.state = BOMB;
                     game_state.bombCount++;
 
+                    char message[BUFFER_SIZE] = "A bomb has been placed by the Bomber!\n";
+                    broadcastMessage(message);
+
                     if (game_state.bombCount == BOMB_COUNT) {
                         game_state.start_time = time(NULL);
                         char message[BUFFER_SIZE] = "All bombs are placed. The time starts now! 1 minute left!\n";
@@ -94,6 +114,8 @@ void *handleClient(void *data) {
                 game_state.deactivatedBombCount++;
                 // Broadcast the point to all clients
                 broadcastPoint(point);
+                char message[BUFFER_SIZE] = "A bomb has been deactivated by the Mine clearer!\n";
+                broadcastMessage(message);
                 break;
             default:
                 fprintf(stderr, "Unknown request: %d\n", point.state);
@@ -166,6 +188,9 @@ void sendMap(socket_t client_sockets[], int num_clients, Map *map) {
  * @return int
  */
 int main() {
+    // Handle ctrl+c
+    signal(SIGINT, handle_sigint);
+
     srand(time(NULL));  // Seed the random number generator
 
     socket_t server_socket = creerSocketEcoute(ADDRESS_SERVER, PORT_SERVER);
@@ -253,6 +278,8 @@ int main() {
             game_state.deactivatedBombCount = 0;
             game_state.start_time = 0;
             game_state.gameEnded = 0;
+            // Reset the map for the next game
+            generateMap(map);
         }
     }
 
