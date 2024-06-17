@@ -5,12 +5,11 @@
 #include <time.h>
 #include <pthread.h>
 //#include <wiringPi.h>
+#include <wiringPiI2C.h>
 #include "../library/data.h"
 #include "../library/session.h"
 
 // --- Constants ---
-#define ADDRESS_SERVER "0.0.0.0"
-#define PORT_SERVER 8080
 #define BUFFER_SIZE 1024
 
 // #define GPIO_PIN_UP 37 // GPIO pin for the up button

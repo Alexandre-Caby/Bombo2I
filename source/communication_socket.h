@@ -9,7 +9,7 @@
 
 // --- Constants ---
 #define PORT_SERVER 8080
-#define ADDRESS_SERVER "0.0.0.0"
+#define ADDRESS_SERVER "192.168.144.100"
 #define MAX_CLIENTS 2
 #define BUFFER_SIZE 1024
 #define BOMB_COUNT 5

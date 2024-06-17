@@ -19,7 +19,7 @@
  * @see INADDR_SVC
  */
 #define PORT_SVC 8080
-#define INADDR_SVC "0.0.0.0"
+#define INADDR_SVC "192.168.144.100"
 
 /**
  * @brief Macro to check the return value of a function
