@@ -97,7 +97,7 @@ void *handleClient(void *data) {
 
                     if (game_state.bombCount == BOMB_COUNT) {
                         game_state.start_time = time(NULL);
-                        char message[BUFFER_SIZE] = "All bombs are placed. The time starts now! 1 minute left!\n";
+                        char message[BUFFER_SIZE] = "All bombs are placed. The countdown starts now! 1 minute left!\n";
                         broadcastMessage(message);
                     }
                     // Broadcast the point to all clients

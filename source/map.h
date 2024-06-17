@@ -4,7 +4,7 @@
 #include <SDL2/SDL_ttf.h>
 #include <time.h>
 #include <pthread.h>
-// #include <wiringPi.h>
+//#include <wiringPi.h>
 #include "../library/data.h"
 #include "../library/session.h"
 
@@ -64,5 +64,6 @@ void handleInput(Player *player, Map *map, int action);
 void movePlayer(Player *player, Map *map, int dx, int dy);
 void renderPlayer(SDL_Renderer *renderer, Player *player);
 // void gpioInitialise();
+void chrono(int fd);
+void display7segments(int fd, int sec, int min);
 void *receiveUpdates(void *arg);
-void *receiveMessages(void *arg);

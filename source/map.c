@@ -3,6 +3,7 @@
 // --- Global variables ---
 pthread_mutex_t map_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t renderer_mutex = PTHREAD_MUTEX_INITIALIZER;
+int fd; // File descriptor for the I2C bus
 
 /**
  * function main
@@ -59,7 +60,8 @@ int main() {
     sleep(1);
 
     // Initialize GPIO pins
-    // gpioInitialise();
+    // wiringPiSetup();
+    // fd = wiringPiI2CSetup(0x70); // Initialize the I2C bus for the 7-segment display
 
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -225,6 +227,10 @@ int main() {
                             showMessage(renderer, font, event.user.data1);
                             SDL_Delay(2000); // Display message for 2 seconds
                             running = 0;
+                            break;
+                        case 4:
+                            // Start the countdown timer
+                            //chrono(fd);
                             break;
                     }
                     break;
@@ -612,6 +618,57 @@ void renderPlayer(SDL_Renderer *renderer, Player *player) {
 //     pullUpDnControl(GPIO_PIN_LEFT, PUD_UP);
 // }
 
+/**
+ * function chrono
+ * @brief Countdown timer for 1 minute on the 7-segment display
+ * 
+ * @param fd 
+ * @return void
+ */
+// void chrono(int fd) {
+//     int sec = 60; // Initialize seconds to 60
+//     int min = 1; // Initialize minutes to 1
+//     display7segments(fd, sec, min); // Initial display
+
+//     while (min > 0 || sec > 0) { // Run until minutes and seconds reach 0
+//         if (sec == 0) {
+//             sec = 59;
+//             min--;
+//         } else {
+//             sec--;
+//         }
+//         display7segments(fd, sec, min);
+//         sleep(1); // Wait for 1 second
+//     }
+
+//     // Display 00:00 on the 7-segment display
+//     display7segments(fd, 0, 0);
+// }
+
+/**
+ * function display7segments
+ * @brief Display the time on the 7-segment display
+ * 
+ * @param fd 
+ * @param sec 
+ * @param min 
+ * @return void
+ */
+// void display7segments(int fd, int sec, int min) {
+//     int hexValues[] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f};
+
+//     int unite_min = min % 10;
+//     int unite_sec = sec % 10;
+//     int dizaine_min = min / 10;
+//     int dizaine_sec = sec / 10;
+
+//     wiringPiI2CWriteReg8(fd, 0x00, hexValues[dizaine_min]); // Write the tens of minutes
+//     wiringPiI2CWriteReg8(fd, 0x02, hexValues[unite_min]); // Write the units of minutes
+//     wiringPiI2CWriteReg8(fd, 0x04, 0x02);              // Write the colon
+//     wiringPiI2CWriteReg8(fd, 0x06, hexValues[dizaine_sec]); // Write the tens of seconds
+//     wiringPiI2CWriteReg8(fd, 0x08, hexValues[unite_sec]); // Write the units of seconds
+// }
+
 // --- Communication functions ---
 
 /**
@@ -663,7 +720,13 @@ void *receiveUpdates(void *arg) {
                 event.user.code = 3;
                 event.user.data1 = strcpy(malloc(strlen(buffer) + 1), buffer);
                 SDL_PushEvent(&event);
-            }else{
+            }else if (strstr(buffer, "The countdown starts now!") != NULL) {
+                // Start the countdown timer
+                SDL_Event event;
+                event.type = SDL_USEREVENT;
+                event.user.code = 4; // Code 4 for starting the countdown
+                SDL_PushEvent(&event);
+            } else{
                 // Display the message received from the server
                 SDL_Event event;
                 event.type = SDL_USEREVENT;
