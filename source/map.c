@@ -139,6 +139,11 @@ int main() {
     Uint32 bombDeactivationTime = 4000;
     int running = 1;
     while (running) {
+        // If the server closes the connection, the client should exit
+        if (recv(sock.fd, NULL, 0, MSG_PEEK) == 0) {
+            running = 0;
+            break;
+        }
         // Handle the input from the user and send it to the server
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
