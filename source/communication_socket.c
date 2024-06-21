@@ -153,8 +153,6 @@ void *handleClient(void *data) {
     return NULL;
 }
 
-
-
 /**
  * function sendMap
  * @brief Send the map to all clients
@@ -178,8 +176,6 @@ void sendMap(socket_t client_sockets[], int num_clients, Map *map) {
         }
     }
 }
-
-
 
 /**
  * function main

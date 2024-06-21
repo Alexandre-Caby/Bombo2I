@@ -28,7 +28,7 @@ void envoyer(socket_t *sockEch, generic quoi, pFct serial, ...)
         // Call the serialization function, passing the address of buffer and the variable arguments
         va_list args;
         va_start(args, serial);
-        (*serial)(buffer, args);
+        //(*serial)(buffer, args);
         va_end(args);
     }
     else

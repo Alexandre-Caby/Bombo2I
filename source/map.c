@@ -39,9 +39,17 @@ int main() {
     int *received_cells = (int *)malloc(map->width * map->height * sizeof(int));
     recv(sock.fd, received_cells, map->width * map->height * sizeof(int), 0);
 
+    // Debug : verify the received cells
+    for (int i = 0; i < map->width * map->height; i++) {
+        printf("%d ", received_cells[i]);
+    }
+
     // Copy received cells to map->cells
     memcpy(map->cells, received_cells, map->width * map->height * sizeof(int));
-
+    // debug : verify the map cells
+    for (int i = 0; i < map->width * map->height; i++) {
+        printf("%d ", map->cells[i]);
+    }
     // Free allocated memory for received cells
     free(received_cells);
 
@@ -60,8 +68,9 @@ int main() {
     sleep(1);
 
     // Initialize GPIO pins
-    // wiringPiSetup();
-    // fd = wiringPiI2CSetup(0x70); // Initialize the I2C bus for the 7-segment display
+    wiringPiSetup();
+    setupButtonMatrix();
+    fd = wiringPiI2CSetup(0x70); // Initialize the I2C bus for the 7-segment display
 
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -131,6 +140,7 @@ int main() {
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
         SDL_Quit();
+        printf("Debug: Closing socket\n");
         return 1;
     }
 
@@ -139,11 +149,12 @@ int main() {
     Uint32 bombDeactivationTime = 4000;
     int running = 1;
     while (running) {
-        // If the server closes the connection, the client should exit
-        if (recv(sock.fd, NULL, 0, MSG_PEEK) == 0) {
-            running = 0;
-            break;
-        }
+        // // If the server closes the connection, the client should exit
+        // if (recv(sock.fd, NULL, 0, MSG_PEEK) == 0) {
+        //     running = 0;
+        //     break;
+        // }
+        handleButtonMatrix();
         // Handle the input from the user and send it to the server
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -235,7 +246,7 @@ int main() {
                             break;
                         case 4:
                             // Start the countdown timer
-                            //chrono(fd);
+                            chrono(fd);
                             break;
                     }
                     break;
@@ -607,21 +618,17 @@ void renderPlayer(SDL_Renderer *renderer, Player *player) {
 }
 
 /**
- * function gpioInitialise
- * @brief Initialize the GPIO pins
+ * function initHT16K33
+ * @brief Initialize the 7-segment display
  * 
+ * @param fd
  * @return void
  */
-// void gpioInitialise() {
-//     wiringPiSetupGpio();
-//     pinMode(GPIO_PIN_UP, INPUT);
-//     pinMode(GPIO_PIN_DOWN, INPUT);
-//     pinMode(GPIO_PIN_LEFT, INPUT);
-//     pinMode(GPIO_PIN_RIGHT, INPUT);
-//     pullUpDnControl(GPIO_PIN_UP, PUD_UP);
-//     pullUpDnControl(GPIO_PIN_DOWN, PUD_UP);
-//     pullUpDnControl(GPIO_PIN_LEFT, PUD_UP);
-// }
+void initHT16K33(int fd) {
+    wiringPiI2CWrite(fd, HT16K33_CMD_SYSTEM_SETUP | 0x01); // Activate the system
+    wiringPiI2CWrite(fd, HT16K33_CMD_DISPLAY_SETUP | 0x01); // Activate the display
+    wiringPiI2CWrite(fd, HT16K33_CMD_BRIGHTNESS | 0x0F); // Set the brightness to maximum
+}
 
 /**
  * function chrono
@@ -630,25 +637,26 @@ void renderPlayer(SDL_Renderer *renderer, Player *player) {
  * @param fd 
  * @return void
  */
-// void chrono(int fd) {
-//     int sec = 60; // Initialize seconds to 60
-//     int min = 1; // Initialize minutes to 1
-//     display7segments(fd, sec, min); // Initial display
+void chrono(int fd) {
+    printf("7segments");
+    int sec = 60; // Initialize seconds to 60
+    int min = 1; // Initialize minutes to 1
+    display7segments(fd, sec, min); // Initial display
+    printf("ok");
+    while (min > 0 || sec > 0) { // Run until minutes and seconds reach 0
+        if (sec == 0) {
+            sec = 59;
+            min--;
+        } else {
+            sec--;
+        }
+        display7segments(fd, sec, min);
+        sleep(1); // Wait for 1 second
+    }
 
-//     while (min > 0 || sec > 0) { // Run until minutes and seconds reach 0
-//         if (sec == 0) {
-//             sec = 59;
-//             min--;
-//         } else {
-//             sec--;
-//         }
-//         display7segments(fd, sec, min);
-//         sleep(1); // Wait for 1 second
-//     }
-
-//     // Display 00:00 on the 7-segment display
-//     display7segments(fd, 0, 0);
-// }
+    // Display 00:00 on the 7-segment display
+    display7segments(fd, 0, 0);
+}
 
 /**
  * function display7segments
@@ -659,20 +667,100 @@ void renderPlayer(SDL_Renderer *renderer, Player *player) {
  * @param min 
  * @return void
  */
-// void display7segments(int fd, int sec, int min) {
-//     int hexValues[] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f};
+void display7segments(int fd, int sec, int min) {
+    const int digits[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
+    int min_tens = min / 10;
+    int min_units = min % 10;
+    int sec_tens = sec / 10;
+    int sec_units = sec % 10;
 
-//     int unite_min = min % 10;
-//     int unite_sec = sec % 10;
-//     int dizaine_min = min / 10;
-//     int dizaine_sec = sec / 10;
+    // Display digits
+    wiringPiI2CWriteReg8(fd, 0x00, digits[min_tens]);    // Tens place of minutes
+    wiringPiI2CWriteReg8(fd, 0x02, digits[min_units]);   // Units place of minutes
+    wiringPiI2CWriteReg8(fd, 0x04, 0x02);                // 2 dots
+    wiringPiI2CWriteReg8(fd, 0x04, digits[sec_tens]);    // Tens place of seconds
+    wiringPiI2CWriteReg8(fd, 0x06, digits[sec_units]);   // Units place of seconds
+}
 
-//     wiringPiI2CWriteReg8(fd, 0x00, hexValues[dizaine_min]); // Write the tens of minutes
-//     wiringPiI2CWriteReg8(fd, 0x02, hexValues[unite_min]); // Write the units of minutes
-//     wiringPiI2CWriteReg8(fd, 0x04, 0x02);              // Write the colon
-//     wiringPiI2CWriteReg8(fd, 0x06, hexValues[dizaine_sec]); // Write the tens of seconds
-//     wiringPiI2CWriteReg8(fd, 0x08, hexValues[unite_sec]); // Write the units of seconds
-// }
+// --- Button matrix functions ---
+/**
+ * function setupButtonMatrix
+ * @brief Setup the button matrix
+ * 
+ * @return void 
+ */
+void setupButtonMatrix() {
+    for (int i = 0; i < ROWS; i++) {
+        pinMode(rows[i], INPUT);
+        pullUpDnControl(rows[i], PUD_UP);
+    }
+    for (int j = 0; j < COLS; j++) {
+        pinMode(cols[j], OUTPUT);
+        digitalWrite(cols[j], HIGH);
+    }
+}
+
+/**
+ * function generateSDLEventButton
+ * @brief Generate an SDL event based on the button pressed
+ * 
+ * @param btnIndex 
+ * @return void
+ */
+void generateSDLEventButton(int btnIndex) {
+    SDL_Event event;
+    SDL_zero(event);
+
+    printf("button : %d", btnIndex);
+    switch (btnIndex) {
+        case 2: // Button 2
+            event.type = SDL_KEYDOWN;
+            event.key.keysym.sym = SDLK_UP;
+            break;
+        case 8: // Button 8
+            event.type = SDL_KEYDOWN;
+            event.key.keysym.sym = SDLK_DOWN;
+            break;
+        case 4: // Button 4
+            event.type = SDL_KEYDOWN;
+            event.key.keysym.sym = SDLK_LEFT;
+            break;
+        case 6: // Button 6
+            event.type = SDL_KEYDOWN;
+            event.key.keysym.sym = SDLK_RIGHT;
+            break;
+        case 5: // Button 5
+            event.type = SDL_KEYDOWN;
+            event.key.keysym.sym = SDLK_SPACE; // Use space for bomb action
+            break;
+        default:
+            printf("Invalid button pressed\n");
+            return;
+    }
+
+    SDL_PushEvent(&event);
+}
+
+/**
+ * function handleButtonMatrix
+ * @brief Check if a button is held down
+ * 
+ * @param pin 
+ * @return int
+ */
+void handleButtonMatrix() {
+    for (int i = 0; i < COLS; i++) {
+        digitalWrite(cols[i], LOW);
+        for (int j = 0; j < ROWS; j++) {
+            if (digitalRead(rows[j]) == LOW) {
+                printf("Button pressed :%d",rows[j]);
+                generateSDLEventButton(j * 3 + i + 1);
+                usleep(623487); // Debounce delay
+            }
+        }
+        digitalWrite(cols[i], HIGH);
+    }
+}
 
 // --- Communication functions ---
 
@@ -702,11 +790,14 @@ void *receiveUpdates(void *arg) {
             break;
         }
 
+        printf("Debug: Received %d bytes\n", recv_size);
+
         buffer[recv_size] = '\0';
 
         // Determine the type of message received
         if (recv_size == sizeof(Point)) {
             Point *point = (Point *)buffer;
+            printf("Debug: Received point from server: (%d, %d, %d)\n", point->x, point->y, point->state);
             
             pthread_mutex_lock(&map_mutex);
             setSpecialPoint(map, point->x, point->y, point->state);
@@ -717,7 +808,7 @@ void *receiveUpdates(void *arg) {
             event.user.code = 1; // Code 1 for rendering the map
             SDL_PushEvent(&event);
         } else {
-            printf("Received message from server: %s\n", buffer);
+            printf("Debug: Received message from server: %s\n", buffer);
 
             if (strstr(buffer, "Game ended") != NULL) {
                 SDL_Event event;
@@ -731,7 +822,7 @@ void *receiveUpdates(void *arg) {
                 event.type = SDL_USEREVENT;
                 event.user.code = 4; // Code 4 for starting the countdown
                 SDL_PushEvent(&event);
-            } else{
+            } else {
                 // Display the message received from the server
                 SDL_Event event;
                 event.type = SDL_USEREVENT;

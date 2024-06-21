@@ -1,21 +1,28 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <time.h>
 #include <pthread.h>
-//#include <wiringPi.h>
+#include <wiringPi.h>
 #include <wiringPiI2C.h>
 #include "../library/data.h"
 #include "../library/session.h"
 
 // --- Constants ---
 #define BUFFER_SIZE 1024
+#define LOW 0 // GPIO pin state
+#define HIGH 1 // GPIO pin state
+#define ROWS 4
+#define COLS 4
+#define HT16K33_CMD_SYSTEM_SETUP 0x20
+#define HT16K33_CMD_DISPLAY_SETUP 0x80
+#define HT16K33_CMD_BRIGHTNESS 0xE0
 
-// #define GPIO_PIN_UP 37 // GPIO pin for the up button
-// #define GPIO_PIN_DOWN 33 // GPIO pin for the down button
-// #define GPIO_PIN_LEFT 22 // GPIO pin for the left button
-// #define GPIO_PIN_RIGHT 35 // GPIO pin for the right button
+// Define GPIO pins for the rows and columns
+int rows[ROWS] = {2, 3, 21, 22};
+int cols[COLS] = {6, 25, 24, 23};
 
 // --- Structures ---
 typedef enum {
@@ -62,7 +69,13 @@ void movePlayer(Player *player, Map *map, int dx, int dy);
 void handleInput(Player *player, Map *map, int action);
 void movePlayer(Player *player, Map *map, int dx, int dy);
 void renderPlayer(SDL_Renderer *renderer, Player *player);
-// void gpioInitialise();
+
+void handleButtonMatrix();
+void generateSDLEventButton(int btnIndex);
+void setupButtonMatrix();
+
+void initHT16K33(int fd);
 void chrono(int fd);
 void display7segments(int fd, int sec, int min);
+
 void *receiveUpdates(void *arg);
