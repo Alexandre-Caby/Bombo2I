@@ -76,6 +76,7 @@ void setupButtonMatrix();
 
 void initHT16K33(int fd);
 void chrono(int fd);
-void display7segments(int fd, int sec, int min);
+void display7segments(int fd, int sec);
+void *chrono_thread(void *arg);
 
 void *receiveUpdates(void *arg);

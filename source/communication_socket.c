@@ -92,14 +92,25 @@ void *handleClient(void *data) {
                     point.state = BOMB;
                     game_state.bombCount++;
 
-                    char message[BUFFER_SIZE] = "A bomb has been placed by the Bomber!\n";
-                    broadcastMessage(message);
-
-                    if (game_state.bombCount == BOMB_COUNT) {
-                        game_state.start_time = time(NULL);
-                        char message[BUFFER_SIZE] = "All bombs are placed. The countdown starts now! 1 minute left!\n";
+                    if(game_state.bombCount < 5){
+                        char message[BUFFER_SIZE] = "A bomb has been placed by the Bomber!\n";
                         broadcastMessage(message);
+                        usleep(100000); // 100 ms
+
+                    } else if (game_state.bombCount == BOMB_COUNT) {
+                        // Start the countdown thread
+                        pthread_t countdown_thread;
+                        if (pthread_create(&countdown_thread, NULL, countdownMonitor, NULL) != 0) {
+                            perror("Failed to create countdown thread");
+                            pthread_mutex_unlock(&game_state.mutex);
+                            close(client_socket.fd);
+                            free(client_data);
+                            pthread_exit(NULL);
+                        }
+                        usleep(100000); // 100 ms
                     }
+                    // Delay
+                    usleep(100000); // 100 ms
                     // Broadcast the point to all clients
                     broadcastPoint(point);
                 } else {
@@ -114,6 +125,8 @@ void *handleClient(void *data) {
                 game_state.deactivatedBombCount++;
                 // Broadcast the point to all clients
                 broadcastPoint(point);
+                // delay
+                usleep(100000); // 100 ms
                 char message[BUFFER_SIZE] = "A bomb has been deactivated by the Mine clearer!\n";
                 broadcastMessage(message);
                 break;
@@ -129,12 +142,6 @@ void *handleClient(void *data) {
 
                 broadcastMessage(message);
                 pthread_cond_broadcast(&game_state.cond);
-            } else if (game_state.bombCount > 0 && game_state.start_time != 0 && time(NULL) - game_state.start_time >= 60) {
-                game_state.gameEnded = 1;
-                char message[BUFFER_SIZE] = "Game ended: Victory for the Bomber!\n";
-                
-                broadcastMessage(message);
-                pthread_cond_broadcast(&game_state.cond);
             }
         }
 
@@ -143,6 +150,9 @@ void *handleClient(void *data) {
         if (game_state.gameEnded) {
             break;
         }
+
+        // Short delay to avoid busy-waiting
+        usleep(100000); // 100 ms
     }
 
     // Close the client socket
@@ -150,6 +160,42 @@ void *handleClient(void *data) {
     free(client_data);
     pthread_exit(NULL);
 
+    return NULL;
+}
+
+/**
+ * function countdownMonitor
+ * @brief Monitor the countdown for the game
+ * 
+ * @param arg 
+ * @return void* 
+ */
+void *countdownMonitor(void *arg) {
+    pthread_mutex_lock(&game_state.mutex);
+    char message[BUFFER_SIZE] = "All bombs are placed. The countdown starts now! 30 seconds left!\n";
+    broadcastMessage(message);
+    game_state.start_time = time(NULL);
+    pthread_mutex_unlock(&game_state.mutex);
+    
+    while (1) {
+        sleep(1); // Check every second
+
+        pthread_mutex_lock(&game_state.mutex);
+        if (game_state.start_time != 0 && time(NULL) - game_state.start_time >= 60) {
+            if (!game_state.gameEnded) {
+                game_state.gameEnded = 1;
+                char message[BUFFER_SIZE] = "Game ended: Victory for the Bomber!\n";
+                broadcastMessage(message);
+                pthread_cond_broadcast(&game_state.cond);
+            }
+        }
+        pthread_mutex_unlock(&game_state.mutex);
+
+        if (game_state.gameEnded) {
+            break;
+        }
+    }
+    
     return NULL;
 }
 
@@ -168,11 +214,28 @@ void sendMap(socket_t client_sockets[], int num_clients, Map *map) {
     for (int i = 0; i < num_clients; i++) {
         printf("Sending map to client %d\n", client_sockets[i].fd);
         if (client_sockets[i].fd != 0) {
-            // Send the map dimensions
-            send(client_sockets[i].fd, map_size, 2 * sizeof(int), 0);
-            
+            ssize_t bytes_sent = send(client_sockets[i].fd, map_size, 2 * sizeof(int), 0);
+            if (bytes_sent != 2 * sizeof(int)) {
+                perror("Failed to send map dimensions");
+                continue;
+            }
+
             // Send the map cells
-            send(client_sockets[i].fd, map->cells, map->width * map->height * sizeof(int), 0);
+            size_t total_bytes = map->width * map->height * sizeof(int);
+            size_t total_sent = 0;
+            while (total_sent < total_bytes) {
+                bytes_sent = send(client_sockets[i].fd, ((char*)map->cells) + total_sent, total_bytes - total_sent, 0);
+                if (bytes_sent < 0) {
+                    perror("Failed to send map cells");
+                    break;
+                }
+                total_sent += bytes_sent;
+            }
+            // // Send the map dimensions
+            // send(client_sockets[i].fd, map_size, 2 * sizeof(int), 0);
+            
+            // // Send the map cells
+            // send(client_sockets[i].fd, map->cells, map->width * map->height * sizeof(int), 0);
         }
     }
 }

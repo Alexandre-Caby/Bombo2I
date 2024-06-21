@@ -10,6 +10,7 @@
 // --- Constants ---
 #define PORT_SERVER 8080
 #define ADDRESS_SERVER "192.168.144.100"
+//#define ADDRESS_SERVER "0.0.0.0"
 #define MAX_CLIENTS 2
 #define BUFFER_SIZE 1024
 #define BOMB_COUNT 5
@@ -65,6 +66,7 @@ typedef struct {
 
 // --- Functions ---
 void *handleClient(void *socket_desc);
+void *countdownMonitor(void *arg);
 Map* map_new(int width, int height);
 void generateMap(Map *map);
 void sendMap(socket_t client_sockets[], int num_clients, Map *map) ;

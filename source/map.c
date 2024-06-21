@@ -25,33 +25,64 @@ int main() {
 
     // Initialize the random number generator
     srand(time(NULL));
-
-    // Create a new map
     Map *map = map_new(MAX_MAP_WIDTH, MAX_MAP_HEIGHT);
+
     // Receive map dimensions from server
     int map_size[2];
-    recv(sock.fd, map_size, 2 * sizeof(int), 0);
+    ssize_t bytes_received = recv(sock.fd, map_size, 2 * sizeof(int), 0);
+    if (bytes_received != 2 * sizeof(int)) {
+        perror("Failed to receive map dimensions");
+        exit(EXIT_FAILURE);
+    }
     map->width = map_size[0];
     map->height = map_size[1];
     printf("Map received, width: %d, height: %d\n", map->width, map->height);
 
-    // Receive map cells from server
+    // Allocate memory for received cells
     int *received_cells = (int *)malloc(map->width * map->height * sizeof(int));
-    recv(sock.fd, received_cells, map->width * map->height * sizeof(int), 0);
+    if (received_cells == NULL) {
+        perror("Failed to allocate memory for received cells");
+        exit(EXIT_FAILURE);
+    }
 
-    // Debug : verify the received cells
+    // Receive map cells from server
+    size_t total_bytes = map->width * map->height * sizeof(int);
+    size_t total_received = 0;
+    while (total_received < total_bytes) {
+        bytes_received = recv(sock.fd, ((char*)received_cells) + total_received, total_bytes - total_received, 0);
+        if (bytes_received < 0) {
+            perror("Failed to receive map cells");
+            free(received_cells);
+            exit(EXIT_FAILURE);
+        }
+        if (bytes_received == 0) {
+            printf("Connection closed by server.\n");
+            free(received_cells);
+            exit(EXIT_FAILURE);
+        }
+        total_received += bytes_received;
+    }
+
+    // Debug: Verify the received cells
+    printf("Received cells:\n");
     for (int i = 0; i < map->width * map->height; i++) {
         printf("%d ", received_cells[i]);
     }
+    printf("\n");
 
     // Copy received cells to map->cells
     memcpy(map->cells, received_cells, map->width * map->height * sizeof(int));
-    // debug : verify the map cells
+
+    // Debug: Verify the map cells
+    printf("Map cells:\n");
     for (int i = 0; i < map->width * map->height; i++) {
         printf("%d ", map->cells[i]);
     }
+    printf("\n");
+
     // Free allocated memory for received cells
     free(received_cells);
+    sleep(3);
 
     // Receive the player role from the server
     Player player;
@@ -71,6 +102,7 @@ int main() {
     wiringPiSetup();
     setupButtonMatrix();
     fd = wiringPiI2CSetup(0x70); // Initialize the I2C bus for the 7-segment display
+    initHT16K33(fd);
 
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -149,11 +181,6 @@ int main() {
     Uint32 bombDeactivationTime = 4000;
     int running = 1;
     while (running) {
-        // // If the server closes the connection, the client should exit
-        // if (recv(sock.fd, NULL, 0, MSG_PEEK) == 0) {
-        //     running = 0;
-        //     break;
-        // }
         handleButtonMatrix();
         // Handle the input from the user and send it to the server
         SDL_Event event;
@@ -243,10 +270,6 @@ int main() {
                             showMessage(renderer, font, event.user.data1);
                             SDL_Delay(2000); // Display message for 2 seconds
                             running = 0;
-                            break;
-                        case 4:
-                            // Start the countdown timer
-                            chrono(fd);
                             break;
                     }
                     break;
@@ -369,6 +392,7 @@ void drawMap(SDL_Renderer *renderer, Map *map, TTF_Font *font) {
 void setSpecialPoint(Map *map, int x, int y, int state) {
     if (x >= 0 && x < map->width && y >= 0 && y < map->height) {
         map->cells[y * map->width + x] = state;
+        printf("Debug: Cell (%d, %d) set to %d\n", x, y, state);
     }
 }
 
@@ -452,7 +476,6 @@ void placePoint(Map *map, SDL_Renderer *renderer, TTF_Font *font, int x, int y, 
         return;
     }
     printf("Placing point at (%d, %d)\n", x, y);
-    printf("Action: %d\n", action);
 
     // If the player is a mine clearer, they can only deactivate bombs on a cell with a bomb state
     if (action == DEACTIVATED_BOMB && map->cells[y * map->width + x] != BOMB) {
@@ -631,31 +654,37 @@ void initHT16K33(int fd) {
 }
 
 /**
+ * function chrono_thread
+ * @brief Thread function for the countdown timer
+ * 
+ * @param arg
+ * @return void*
+ */
+void *chrono_thread(void *arg) {
+    int fd = *(int *)arg;
+    chrono(fd);
+    return NULL;
+}
+
+/**
  * function chrono
- * @brief Countdown timer for 1 minute on the 7-segment display
+ * @brief Countdown timer for 30 seconds on the 7-segment display
  * 
  * @param fd 
  * @return void
  */
 void chrono(int fd) {
-    printf("7segments");
-    int sec = 60; // Initialize seconds to 60
-    int min = 1; // Initialize minutes to 1
-    display7segments(fd, sec, min); // Initial display
-    printf("ok");
-    while (min > 0 || sec > 0) { // Run until minutes and seconds reach 0
-        if (sec == 0) {
-            sec = 59;
-            min--;
-        } else {
-            sec--;
-        }
-        display7segments(fd, sec, min);
+    int sec = 30; // Initialize seconds to 30
+    display7segments(fd, sec); // Initial display
+
+    while (sec > 0) { // Run until seconds reach 0
+        sec--;
+        display7segments(fd, sec);
         sleep(1); // Wait for 1 second
     }
 
-    // Display 00:00 on the 7-segment display
-    display7segments(fd, 0, 0);
+    // Display 00 on the 7-segment display
+    display7segments(fd, 0);
 }
 
 /**
@@ -667,19 +696,17 @@ void chrono(int fd) {
  * @param min 
  * @return void
  */
-void display7segments(int fd, int sec, int min) {
+void display7segments(int fd, int sec) {
     const int digits[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
-    int min_tens = min / 10;
-    int min_units = min % 10;
     int sec_tens = sec / 10;
     int sec_units = sec % 10;
 
     // Display digits
-    wiringPiI2CWriteReg8(fd, 0x00, digits[min_tens]);    // Tens place of minutes
-    wiringPiI2CWriteReg8(fd, 0x02, digits[min_units]);   // Units place of minutes
-    wiringPiI2CWriteReg8(fd, 0x04, 0x02);                // 2 dots
-    wiringPiI2CWriteReg8(fd, 0x04, digits[sec_tens]);    // Tens place of seconds
-    wiringPiI2CWriteReg8(fd, 0x06, digits[sec_units]);   // Units place of seconds
+    wiringPiI2CWriteReg8(fd, 0x00, 0x00);                // Tens place of minutes (blank)
+    wiringPiI2CWriteReg8(fd, 0x02, 0x00);                // Units place of minutes (blank)
+    wiringPiI2CWriteReg8(fd, 0x04, 0x00);                // 2 dots (blank)
+    wiringPiI2CWriteReg8(fd, 0x06, digits[sec_tens]);    // Tens place of seconds
+    wiringPiI2CWriteReg8(fd, 0x08, digits[sec_units]);   // Units place of seconds
 }
 
 // --- Button matrix functions ---
@@ -711,7 +738,7 @@ void generateSDLEventButton(int btnIndex) {
     SDL_Event event;
     SDL_zero(event);
 
-    printf("button : %d", btnIndex);
+    printf("button : %d ", btnIndex);
     switch (btnIndex) {
         case 2: // Button 2
             event.type = SDL_KEYDOWN;
@@ -753,9 +780,9 @@ void handleButtonMatrix() {
         digitalWrite(cols[i], LOW);
         for (int j = 0; j < ROWS; j++) {
             if (digitalRead(rows[j]) == LOW) {
-                printf("Button pressed :%d",rows[j]);
+                printf("Button pressed :%d ",rows[j]);
                 generateSDLEventButton(j * 3 + i + 1);
-                usleep(623487); // Debounce delay
+                usleep(500000); // Debounce delay
             }
         }
         digitalWrite(cols[i], HIGH);
@@ -775,11 +802,15 @@ void *receiveUpdates(void *arg) {
     recv_thread_data_t *data = (recv_thread_data_t *)arg;
     int sock = data->sock_fd;
     Map *map = data->map;
-    
+
     char buffer[BUFFER_SIZE];
     ssize_t recv_size;
 
     while (1) {
+        // Reset buffer
+        memset(buffer, 0, BUFFER_SIZE);
+
+        // Receive data from the server
         recv_size = recv(sock, buffer, sizeof(buffer), 0);
         if (recv_size <= 0) {
             if (recv_size == 0) {
@@ -792,21 +823,22 @@ void *receiveUpdates(void *arg) {
 
         printf("Debug: Received %d bytes\n", recv_size);
 
-        buffer[recv_size] = '\0';
-
         // Determine the type of message received
         if (recv_size == sizeof(Point)) {
-            Point *point = (Point *)buffer;
-            printf("Debug: Received point from server: (%d, %d, %d)\n", point->x, point->y, point->state);
-            
+            Point point;
+            memcpy(&point, buffer, sizeof(Point));
+            printf("Debug: Received point from server: (%d, %d, %d)\n", point.x, point.y, point.state);
+
             pthread_mutex_lock(&map_mutex);
-            setSpecialPoint(map, point->x, point->y, point->state);
+            setSpecialPoint(map, point.x, point.y, point.state);
             pthread_mutex_unlock(&map_mutex);
 
             SDL_Event event;
             event.type = SDL_USEREVENT;
             event.user.code = 1; // Code 1 for rendering the map
             SDL_PushEvent(&event);
+            // delay
+            usleep(200000); // 200 ms
         } else {
             printf("Debug: Received message from server: %s\n", buffer);
 
@@ -816,11 +848,17 @@ void *receiveUpdates(void *arg) {
                 event.user.code = 3;
                 event.user.data1 = strcpy(malloc(strlen(buffer) + 1), buffer);
                 SDL_PushEvent(&event);
-            }else if (strstr(buffer, "The countdown starts now!") != NULL) {
+            } else if (strstr(buffer, "The countdown starts now!") != NULL) {
                 // Start the countdown timer
+                printf("Debug: start timer\n");
+                pthread_t timer_thread;
+                pthread_create(&timer_thread, NULL, chrono_thread, &fd);
+                pthread_detach(timer_thread);
+                // Display the message received from the server
                 SDL_Event event;
                 event.type = SDL_USEREVENT;
-                event.user.code = 4; // Code 4 for starting the countdown
+                event.user.code = 2;
+                event.user.data1 = strcpy(malloc(strlen(buffer) + 1), buffer);
                 SDL_PushEvent(&event);
             } else {
                 // Display the message received from the server
