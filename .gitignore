@@ -1,5 +1,6 @@
 # Prerequisites
 *.d
+.git
 
 # Object files
 *.o
