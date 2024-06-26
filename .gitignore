@@ -1,11 +1,15 @@
 # Prerequisites
 *.d
+.git
 
 # Object files
 *.o
 *.ko
 *.obj
 *.elf
+
+# Executables
+/app
 
 # Linker output
 *.ilk
